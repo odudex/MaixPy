@@ -467,6 +467,13 @@ if(CONFIG_COMPONENT_MICROPYTHON_ENABLE)
         list(APPEND ADD_INCLUDE "${mpy_port_dir}/src/base43")
         append_srcs_dir(ADD_SRCS "port/src/base43")
     endif()
+    # bc-ur (Blockchain Commons UR) for QR code decoding
+    if(CONFIG_MAIXPY_BC_UR_ENABLE)
+        list(APPEND ADD_INCLUDE "${mpy_port_dir}/src/bc-ur")
+        list(APPEND ADD_INCLUDE "${mpy_port_dir}/src/bc-ur/src")
+        append_srcs_dir(ADD_SRCS "port/src/bc-ur")
+        append_srcs_dir(ADD_SRCS "port/src/bc-ur/src")
+    endif()
     #############################################
 
     ################## FLAGS ####################
