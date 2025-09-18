@@ -19,10 +19,27 @@ typedef struct {
 typedef struct {
     uint32_t seq_num;
     size_t seq_len;
+    size_t message_len;
     uint32_t checksum;
     uint8_t *data;
     size_t data_len;
 } fountain_encoder_part_t;
+
+// Internal decoder part structure
+typedef struct {
+    part_indexes_t indexes;
+    uint8_t *data;
+    size_t data_len;
+} decoder_part_t;
+
+// Queue for processing parts
+typedef struct {
+    decoder_part_t *parts;
+    size_t front;
+    size_t rear;
+    size_t count;
+    size_t capacity;
+} part_queue_t;
 
 // Stored part for reconstruction
 typedef struct {
@@ -71,6 +88,9 @@ typedef struct fountain_decoder {
         size_t count;
         size_t capacity;
     } mixed_parts;
+
+    // Processing queue
+    part_queue_t queue;
 } fountain_decoder_t;
 
 // Function declarations
@@ -148,7 +168,18 @@ size_t fountain_decoder_result_message_len(fountain_decoder_t *decoder);
 part_indexes_t *part_indexes_new(void);
 void part_indexes_free(part_indexes_t *indexes);
 bool part_indexes_add(part_indexes_t *indexes, size_t index);
-bool part_indexes_contains(part_indexes_t *indexes, size_t index);
+bool part_indexes_contains(const part_indexes_t *indexes, size_t index);
 void part_indexes_clear(part_indexes_t *indexes);
+
+// Queue operations
+bool queue_init(part_queue_t *queue, size_t capacity);
+void queue_free(part_queue_t *queue);
+bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part);
+bool queue_dequeue(part_queue_t *queue, decoder_part_t *part);
+bool queue_is_empty(const part_queue_t *queue);
+
+// Part operations
+void decoder_part_free(decoder_part_t *part);
+bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst);
 
 #endif // FOUNTAIN_DECODER_H

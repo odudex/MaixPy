@@ -7,7 +7,7 @@ SRCDIR = .
 OBJDIR = obj
 
 # Source files
-SOURCES = utils.c bytewords.c fountain_decoder.c ur_decoder.c ur.c
+SOURCES = utils.c bytewords.c fountain_decoder.c fountain_utils.c crc32.c ur_decoder.c ur.c
 
 # Object files
 OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
@@ -40,7 +40,9 @@ clean:
 
 # Dependencies (simplified)
 $(OBJDIR)/utils.o: utils.c utils.h
-$(OBJDIR)/bytewords.o: bytewords.c bytewords.h utils.h
-$(OBJDIR)/fountain_decoder.o: fountain_decoder.c fountain_decoder.h utils.h
+$(OBJDIR)/crc32.o: crc32.c crc32.h
+$(OBJDIR)/bytewords.o: bytewords.c bytewords.h utils.h crc32.h
+$(OBJDIR)/fountain_utils.o: fountain_utils.c fountain_utils.h fountain_decoder.h utils.h
+$(OBJDIR)/fountain_decoder.o: fountain_decoder.c fountain_decoder.h fountain_utils.h crc32.h utils.h
 $(OBJDIR)/ur_decoder.o: ur_decoder.c ur_decoder.h fountain_decoder.h bytewords.h utils.h
 $(OBJDIR)/ur.o: ur.c ur.h ur_decoder.h utils.h

@@ -1,9 +1,132 @@
 #include "fountain_decoder.h"
+#include "fountain_utils.h"
+#include "crc32.h"
 #include "utils.h"
 #include <stdlib.h>
 #include <string.h>
 
-// Part indexes functions
+// Queue operations
+bool queue_init(part_queue_t *queue, size_t capacity) {
+    if (!queue || capacity == 0) return false;
+
+    queue->parts = safe_malloc(capacity * sizeof(decoder_part_t));
+    if (!queue->parts) return false;
+
+    // Initialize all decoder_part_t structures in the array
+    for (size_t i = 0; i < capacity; i++) {
+        queue->parts[i].indexes.indexes = NULL;
+        queue->parts[i].indexes.count = 0;
+        queue->parts[i].indexes.capacity = 0;
+        queue->parts[i].data = NULL;
+        queue->parts[i].data_len = 0;
+    }
+
+    queue->front = 0;
+    queue->rear = 0;
+    queue->count = 0;
+    queue->capacity = capacity;
+
+    return true;
+}
+
+void queue_free(part_queue_t *queue) {
+    if (!queue) return;
+
+    if (queue->parts) {
+        // Free all parts in queue
+        for (size_t i = 0; i < queue->count; i++) {
+            size_t idx = (queue->front + i) % queue->capacity;
+            decoder_part_free(&queue->parts[idx]);
+        }
+        free(queue->parts);
+    }
+
+    memset(queue, 0, sizeof(part_queue_t));
+}
+
+bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part) {
+    if (!queue || !part || queue->count >= queue->capacity) return false;
+
+    if (!decoder_part_copy(part, &queue->parts[queue->rear])) {
+        return false;
+    }
+
+    queue->rear = (queue->rear + 1) % queue->capacity;
+    queue->count++;
+
+    return true;
+}
+
+bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
+    if (!queue || !part || queue->count == 0) return false;
+
+    if (!decoder_part_copy(&queue->parts[queue->front], part)) {
+        return false;
+    }
+
+    decoder_part_free(&queue->parts[queue->front]);
+    queue->front = (queue->front + 1) % queue->capacity;
+    queue->count--;
+
+    return true;
+}
+
+bool queue_is_empty(const part_queue_t *queue) {
+    return !queue || queue->count == 0;
+}
+
+// Part operations
+void decoder_part_free(decoder_part_t *part) {
+    if (!part) return;
+
+    if (part->indexes.indexes) {
+        free(part->indexes.indexes);
+        part->indexes.indexes = NULL;
+    }
+    part->indexes.count = 0;
+    part->indexes.capacity = 0;
+
+    if (part->data) {
+        free(part->data);
+        part->data = NULL;
+    }
+    part->data_len = 0;
+}
+
+bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst) {
+    if (!src || !dst) return false;
+
+    // Clear destination first
+    decoder_part_free(dst);
+
+    // Initialize destination indexes
+    dst->indexes.indexes = NULL;
+    dst->indexes.count = 0;
+    dst->indexes.capacity = 0;
+
+    // Copy indexes
+    if (!part_indexes_copy(&src->indexes, &dst->indexes)) {
+        return false;
+    }
+
+    // Copy data
+    if (src->data && src->data_len > 0) {
+        dst->data = safe_malloc(src->data_len);
+        if (!dst->data) {
+            part_indexes_free(&dst->indexes);
+            return false;
+        }
+        memcpy(dst->data, src->data, src->data_len);
+        dst->data_len = src->data_len;
+    } else {
+        dst->data = NULL;
+        dst->data_len = 0;
+    }
+
+    return true;
+}
+
+// Part indexes functions (updated)
 part_indexes_t *part_indexes_new(void) {
     part_indexes_t *indexes = safe_malloc(sizeof(part_indexes_t));
     if (indexes) {
@@ -45,7 +168,7 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
     return true;
 }
 
-bool part_indexes_contains(part_indexes_t *indexes, size_t index) {
+bool part_indexes_contains(const part_indexes_t *indexes, size_t index) {
     if (!indexes) return false;
 
     for (size_t i = 0; i < indexes->count; i++) {
@@ -62,7 +185,7 @@ void part_indexes_clear(part_indexes_t *indexes) {
     }
 }
 
-// Fountain decoder functions
+// Fountain decoder implementation
 fountain_decoder_t *fountain_decoder_new(void) {
     fountain_decoder_t *decoder = safe_malloc(sizeof(fountain_decoder_t));
     if (!decoder) return NULL;
@@ -80,7 +203,7 @@ fountain_decoder_t *fountain_decoder_new(void) {
     decoder->expected_message_len = 0;
     decoder->expected_checksum = 0;
 
-    // Initialize parts storage for sequential reconstruction
+    // Initialize parts storage
     decoder->parts = NULL;
     decoder->parts_capacity = 0;
 
@@ -97,6 +220,12 @@ fountain_decoder_t *fountain_decoder_new(void) {
     decoder->mixed_parts.value_lens = NULL;
     decoder->mixed_parts.count = 0;
     decoder->mixed_parts.capacity = 0;
+
+    // Initialize queue
+    if (!queue_init(&decoder->queue, 100)) {
+        free(decoder);
+        return NULL;
+    }
 
     return decoder;
 }
@@ -150,7 +279,9 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
     // Free mixed parts
     if (decoder->mixed_parts.key_sets) {
         for (size_t i = 0; i < decoder->mixed_parts.count; i++) {
-            part_indexes_free(&decoder->mixed_parts.key_sets[i]);
+            if (decoder->mixed_parts.key_sets[i].indexes) {
+                free(decoder->mixed_parts.key_sets[i].indexes);
+            }
         }
         free(decoder->mixed_parts.key_sets);
     }
@@ -164,32 +295,250 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
         free(decoder->mixed_parts.values);
     }
 
+    // Free queue
+    queue_free(&decoder->queue);
+
     free(decoder);
 }
 
+static bool create_decoder_part_from_encoder_part(const fountain_encoder_part_t *encoder_part, decoder_part_t *decoder_part) {
+    if (!encoder_part || !decoder_part) {
+        return false;
+    }
+
+    // Initialize decoder part
+    decoder_part->indexes.indexes = NULL;
+    decoder_part->indexes.count = 0;
+    decoder_part->indexes.capacity = 0;
+    decoder_part->data = NULL;
+    decoder_part->data_len = 0;
+
+    // Choose fragments based on sequence number and checksum
+    if (!choose_fragments(encoder_part->seq_num, encoder_part->seq_len, encoder_part->checksum, &decoder_part->indexes)) {
+        return false;
+    }
+
+    // Copy data
+    if (encoder_part->data && encoder_part->data_len > 0) {
+        decoder_part->data = safe_malloc(encoder_part->data_len);
+        if (!decoder_part->data) {
+            if (decoder_part->indexes.indexes) {
+                free(decoder_part->indexes.indexes);
+                decoder_part->indexes.indexes = NULL;
+            }
+            return false;
+        }
+        memcpy(decoder_part->data, encoder_part->data, encoder_part->data_len);
+        decoder_part->data_len = encoder_part->data_len;
+    }
+
+    return true;
+}
+
+static bool is_simple_part(const decoder_part_t *part) {
+    return part && part->indexes.count == 1;
+}
+
+static size_t get_part_index(const decoder_part_t *part) {
+    if (!part || part->indexes.count == 0) return 0;
+    return part->indexes.indexes[0];
+}
+
+static bool add_simple_part(fountain_decoder_t *decoder, const decoder_part_t *part) {
+    if (!decoder || !part || !is_simple_part(part)) return false;
+
+    size_t index = get_part_index(part);
+
+    // Check if already exists
+    for (size_t i = 0; i < decoder->simple_parts.count; i++) {
+        if (decoder->simple_parts.keys[i] == index) {
+            return true; // Already exists
+        }
+    }
+
+    // Expand arrays if needed
+    if (decoder->simple_parts.count >= decoder->simple_parts.capacity) {
+        size_t new_capacity = decoder->simple_parts.capacity == 0 ? 8 : decoder->simple_parts.capacity * 2;
+
+        size_t *new_keys = safe_realloc(decoder->simple_parts.keys, sizeof(size_t) * new_capacity);
+        uint8_t **new_values = safe_realloc(decoder->simple_parts.values, sizeof(uint8_t*) * new_capacity);
+        size_t *new_lens = safe_realloc(decoder->simple_parts.value_lens, sizeof(size_t) * new_capacity);
+
+        if (!new_keys || !new_values || !new_lens) {
+            return false;
+        }
+
+        decoder->simple_parts.keys = new_keys;
+        decoder->simple_parts.values = new_values;
+        decoder->simple_parts.value_lens = new_lens;
+        decoder->simple_parts.capacity = new_capacity;
+    }
+
+    // Copy data
+    uint8_t *data_copy = NULL;
+    if (part->data && part->data_len > 0) {
+        data_copy = safe_malloc(part->data_len);
+        if (!data_copy) return false;
+        memcpy(data_copy, part->data, part->data_len);
+    }
+
+    decoder->simple_parts.keys[decoder->simple_parts.count] = index;
+    decoder->simple_parts.values[decoder->simple_parts.count] = data_copy;
+    decoder->simple_parts.value_lens[decoder->simple_parts.count] = part->data_len;
+    decoder->simple_parts.count++;
+
+    return true;
+}
+
+// TODO: This function would be used for mixed parts processing
+// static bool reduce_part_by_part(const decoder_part_t *a, const decoder_part_t *b, decoder_part_t *result)
+
+static void process_simple_part(fountain_decoder_t *decoder, const decoder_part_t *part) {
+    if (!decoder || !part || !is_simple_part(part)) return;
+
+    size_t fragment_index = get_part_index(part);
+
+    // Don't process duplicate parts
+    if (part_indexes_contains(&decoder->received_part_indexes, fragment_index)) {
+        return;
+    }
+
+    // Record this part
+    if (!add_simple_part(decoder, part)) {
+        return;
+    }
+
+    if (!part_indexes_add(&decoder->received_part_indexes, fragment_index)) {
+        return;
+    }
+
+    // Check if we have all expected parts
+    if (decoder->expected_part_indexes &&
+        part_indexes_equal(&decoder->received_part_indexes, decoder->expected_part_indexes)) {
+
+        // Reconstruct message
+        size_t part_count = decoder->simple_parts.count;
+        uint8_t **fragments = safe_malloc(part_count * sizeof(uint8_t*));
+        size_t *fragment_lens = safe_malloc(part_count * sizeof(size_t));
+
+        if (!fragments || !fragment_lens) {
+            if (fragments) free(fragments);
+            if (fragment_lens) free(fragment_lens);
+            return;
+        }
+
+        // Sort parts by index (to match Python implementation)
+        // First, create array of (index, fragment, length) tuples
+        typedef struct {
+            size_t index;
+            uint8_t *data;
+            size_t len;
+        } fragment_info_t;
+
+        fragment_info_t *sorted_fragments = safe_malloc(part_count * sizeof(fragment_info_t));
+        if (!sorted_fragments) {
+            free(fragments);
+            free(fragment_lens);
+            return;
+        }
+
+        // Populate the array
+        for (size_t i = 0; i < part_count; i++) {
+            sorted_fragments[i].index = decoder->simple_parts.keys[i];
+            sorted_fragments[i].data = decoder->simple_parts.values[i];
+            sorted_fragments[i].len = decoder->simple_parts.value_lens[i];
+        }
+
+        // Sort by index (simple bubble sort for small arrays)
+        for (size_t i = 0; i < part_count - 1; i++) {
+            for (size_t j = 0; j < part_count - 1 - i; j++) {
+                if (sorted_fragments[j].index > sorted_fragments[j + 1].index) {
+                    fragment_info_t temp = sorted_fragments[j];
+                    sorted_fragments[j] = sorted_fragments[j + 1];
+                    sorted_fragments[j + 1] = temp;
+                }
+            }
+        }
+
+        // Copy sorted fragments to output arrays
+        for (size_t i = 0; i < part_count; i++) {
+            fragments[i] = sorted_fragments[i].data;
+            fragment_lens[i] = sorted_fragments[i].len;
+        }
+
+        free(sorted_fragments);
+
+        // Join fragments
+        uint8_t *message = safe_malloc(decoder->expected_message_len);
+        if (!message) {
+            free(fragments);
+            free(fragment_lens);
+            return;
+        }
+
+        if (join_fragments(fragments, fragment_lens, part_count, decoder->expected_message_len, message)) {
+            // Verify checksum
+            uint32_t checksum = crc32_calculate(message, decoder->expected_message_len);
+
+            if (checksum == decoder->expected_checksum) {
+                // Success!
+                decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));
+                if (decoder->result) {
+                    decoder->result->data = message;
+                    decoder->result->data_len = decoder->expected_message_len;
+                    decoder->result->is_success = true;
+                    decoder->result->is_error = false;
+                    message = NULL; // Don't free it
+                }
+            } else {
+                // Checksum failure
+                decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));
+                if (decoder->result) {
+                    decoder->result->data = NULL;
+                    decoder->result->data_len = 0;
+                    decoder->result->is_success = false;
+                    decoder->result->is_error = true;
+                }
+            }
+        }
+
+        if (message) free(message);
+        free(fragments);
+        free(fragment_lens);
+    }
+}
+
+static void process_queue_item(fountain_decoder_t *decoder) {
+    if (!decoder || queue_is_empty(&decoder->queue)) return;
+
+    decoder_part_t part = {0}; // Initialize to zero
+    part.indexes.indexes = NULL;
+    part.indexes.count = 0;
+    part.indexes.capacity = 0;
+    part.data = NULL;
+    part.data_len = 0;
+
+    if (!queue_dequeue(&decoder->queue, &part)) return;
+
+    if (is_simple_part(&part)) {
+        process_simple_part(decoder, &part);
+    }
+    // TODO: Implement mixed part processing
+
+    decoder_part_free(&part);
+}
+
 bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder_part_t *part) {
-    if (!decoder || !part) return false;
+    if (!decoder || !part) {
+        return false;
+    }
 
     // Don't process if already complete
     if (fountain_decoder_is_complete(decoder)) {
         return false;
     }
 
-    // This is a simplified implementation of the fountain decoding algorithm
-    // For a complete implementation, you would need to implement:
-    // 1. Fragment selection based on sequence number and checksum
-    // 2. XOR operations for mixed parts
-    // 3. Queue processing and reduction algorithms
-
-    // For now, we'll implement basic single-part processing
-    decoder->processed_parts_count++;
-
-    // Store in received parts
-    if (!part_indexes_add(&decoder->received_part_indexes, part->seq_num)) {
-        return false;
-    }
-
-    // For demonstration, we'll assume single part decoding
+    // Initialize expected values from first part
     if (decoder->expected_part_indexes == NULL) {
         decoder->expected_part_indexes = part_indexes_new();
         if (!decoder->expected_part_indexes) return false;
@@ -197,84 +546,54 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder
         for (size_t i = 0; i < part->seq_len; i++) {
             part_indexes_add(decoder->expected_part_indexes, i);
         }
+
+        decoder->expected_checksum = part->checksum;
+        decoder->expected_fragment_len = part->data_len;
+        decoder->expected_message_len = part->message_len; // Use actual message length from part
     }
 
-    // Store the part data for reconstruction
-    if (!decoder->parts) {
-        decoder->parts = safe_malloc(sizeof(stored_part_t) * part->seq_len);
-        if (!decoder->parts) return false;
-        decoder->parts_capacity = part->seq_len;
-        // Initialize all parts as not received
-        for (size_t i = 0; i < part->seq_len; i++) {
-            decoder->parts[i].data = NULL;
-            decoder->parts[i].data_len = 0;
-            decoder->parts[i].received = false;
-        }
+    // Create decoder part from encoder part
+    decoder_part_t decoder_part;
+    if (!create_decoder_part_from_encoder_part(part, &decoder_part)) {
+        return false;
     }
 
-    // Store this part's data (seq_num is 1-based, convert to 0-based)
-    size_t part_index = part->seq_num - 1;
-    if (part_index < decoder->parts_capacity && !decoder->parts[part_index].received) {
-        decoder->parts[part_index].data = safe_malloc(part->data_len);
-        if (!decoder->parts[part_index].data) return false;
-
-        memcpy(decoder->parts[part_index].data, part->data, part->data_len);
-        decoder->parts[part_index].data_len = part->data_len;
-        decoder->parts[part_index].received = true;
+    // Update last part indexes
+    if (decoder->last_part_indexes) {
+        part_indexes_free(decoder->last_part_indexes);
+    }
+    decoder->last_part_indexes = part_indexes_new();
+    if (decoder->last_part_indexes) {
+        part_indexes_copy(&decoder_part.indexes, decoder->last_part_indexes);
     }
 
-    // Check if we have all parts for reconstruction
-    if (decoder->received_part_indexes.count >= part->seq_len) {
-        // Calculate total data length
-        size_t total_len = 0;
-        for (size_t i = 0; i < part->seq_len; i++) {
-            if (decoder->parts[i].received) {
-                total_len += decoder->parts[i].data_len;
-            } else {
-                // Missing part - cannot reconstruct
-                return true;
-            }
-        }
-
-        // Create result by concatenating all parts in sequence
-        decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));
-        if (!decoder->result) return false;
-
-        decoder->result->data = safe_malloc(total_len);
-        if (!decoder->result->data) {
-            free(decoder->result);
-            decoder->result = NULL;
-            return false;
-        }
-
-        // Concatenate parts in order
-        size_t offset = 0;
-        for (size_t i = 0; i < part->seq_len; i++) {
-            memcpy(decoder->result->data + offset, decoder->parts[i].data, decoder->parts[i].data_len);
-            offset += decoder->parts[i].data_len;
-        }
-
-        decoder->result->data_len = total_len;
-        decoder->result->is_success = true;
-        decoder->result->is_error = false;
+    // Add to queue
+    if (!queue_enqueue(&decoder->queue, &decoder_part)) {
+        decoder_part_free(&decoder_part);
+        return false;
     }
+
+    // Process queue
+    while (!fountain_decoder_is_complete(decoder) && !queue_is_empty(&decoder->queue)) {
+        process_queue_item(decoder);
+    }
+
+    decoder->processed_parts_count++;
+    decoder_part_free(&decoder_part);
 
     return true;
 }
 
 bool fountain_decoder_is_complete(fountain_decoder_t *decoder) {
-    if (!decoder) return false;
-    return decoder->result != NULL;
+    return decoder && decoder->result != NULL;
 }
 
 bool fountain_decoder_is_success(fountain_decoder_t *decoder) {
-    if (!decoder || !decoder->result) return false;
-    return decoder->result->is_success;
+    return decoder && decoder->result && decoder->result->is_success;
 }
 
 bool fountain_decoder_is_failure(fountain_decoder_t *decoder) {
-    if (!decoder || !decoder->result) return false;
-    return decoder->result->is_error;
+    return decoder && decoder->result && decoder->result->is_error;
 }
 
 size_t fountain_decoder_expected_part_count(fountain_decoder_t *decoder) {
@@ -284,17 +603,11 @@ size_t fountain_decoder_expected_part_count(fountain_decoder_t *decoder) {
 
 double fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder) {
     if (!decoder) return 0.0;
+    if (fountain_decoder_is_complete(decoder)) return 1.0;
+    if (!decoder->expected_part_indexes) return 0.0;
 
-    if (fountain_decoder_is_complete(decoder)) {
-        return 1.0;
-    }
-
-    if (!decoder->expected_part_indexes || decoder->expected_part_indexes->count == 0) {
-        return 0.0;
-    }
-
-    double estimated_input_parts = decoder->expected_part_indexes->count * 1.75;
-    double progress = decoder->processed_parts_count / estimated_input_parts;
+    double estimated_input_parts = fountain_decoder_expected_part_count(decoder) * 1.75;
+    double progress = (double)decoder->processed_parts_count / estimated_input_parts;
     return progress > 0.99 ? 0.99 : progress;
 }
 

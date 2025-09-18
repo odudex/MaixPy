@@ -4,6 +4,7 @@
 #include "utils.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 // Helper function to create fountain encoder part from CBOR data
 static fountain_encoder_part_t *create_fountain_part_from_cbor(const uint8_t *cbor_data, size_t cbor_len,
@@ -15,7 +16,8 @@ static fountain_encoder_part_t *create_fountain_part_from_cbor(const uint8_t *cb
 
     part->seq_num = seq_num;
     part->seq_len = seq_len;
-    part->checksum = 0; // Simplified - should calculate actual checksum
+    part->message_len = 0;
+    part->checksum = 0;
     part->data_len = cbor_len;
 
     part->data = safe_malloc(cbor_len);
@@ -232,8 +234,10 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     cbor_ptr++;
     remaining--;
 
-    // Skip seq_num, seq_len, message_len, checksum to get to fragment_data
-    // This is simplified - assumes small integers that fit in single bytes
+    // Parse and extract values: seq_num, seq_len, message_len, checksum
+    uint32_t cbor_seq_num = 0, cbor_seq_len = 0, cbor_message_len = 0, cbor_checksum = 0;
+    uint32_t *values[] = {&cbor_seq_num, &cbor_seq_len, &cbor_message_len, &cbor_checksum};
+
     for (int i = 0; i < 4; i++) {
         if (remaining < 1) {
             decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
@@ -244,18 +248,46 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
             return false;
         }
 
-        // Skip the integer value (simplified - assumes values < 24)
+        // Parse the integer value (simplified - assumes values < 2^32)
         if (cbor_ptr[0] < 24) {
+            *values[i] = cbor_ptr[0];
             cbor_ptr++;
             remaining--;
         } else if (cbor_ptr[0] == 24) {
-            cbor_ptr += 2; // uint8
+            if (remaining < 2) {
+                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+                free(cbor_data);
+                free(type);
+                free_string_array(components, component_count);
+                free(components);
+                return false;
+            }
+            *values[i] = cbor_ptr[1];
+            cbor_ptr += 2;
             remaining -= 2;
         } else if (cbor_ptr[0] == 25) {
-            cbor_ptr += 3; // uint16
+            if (remaining < 3) {
+                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+                free(cbor_data);
+                free(type);
+                free_string_array(components, component_count);
+                free(components);
+                return false;
+            }
+            *values[i] = (cbor_ptr[1] << 8) | cbor_ptr[2];
+            cbor_ptr += 3;
             remaining -= 3;
         } else if (cbor_ptr[0] == 26) {
-            cbor_ptr += 5; // uint32
+            if (remaining < 5) {
+                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+                free(cbor_data);
+                free(type);
+                free_string_array(components, component_count);
+                free(components);
+                return false;
+            }
+            *values[i] = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) | (cbor_ptr[3] << 8) | cbor_ptr[4];
+            cbor_ptr += 5;
             remaining -= 5;
         } else {
             decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
@@ -328,8 +360,12 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
     memcpy(fragment_data, cbor_ptr, fragment_len);
 
-    // Create fountain part with extracted fragment data
+    // Create fountain part with extracted fragment data and checksum
     fountain_encoder_part_t *part = create_fountain_part_from_cbor(fragment_data, fragment_len, seq_num, seq_len);
+    if (part) {
+        part->message_len = cbor_message_len;
+        part->checksum = cbor_checksum;
+    }
     free(fragment_data);
     free(cbor_data);
 

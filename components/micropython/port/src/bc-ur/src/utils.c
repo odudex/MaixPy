@@ -187,6 +187,7 @@ void free_string_array(char **strings, size_t count) {
 }
 
 void *safe_malloc(size_t size) {
+    if (size == 0) return NULL;
     void *ptr = malloc(size);
     if (ptr) {
         memset(ptr, 0, size);

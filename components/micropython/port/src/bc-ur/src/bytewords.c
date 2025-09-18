@@ -1,5 +1,6 @@
 #include "bytewords.h"
 #include "utils.h"
+#include "crc32.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -55,37 +56,6 @@ static const int16_t lookup_table[] = {
     242, -1, -1, -1
 };
 
-// Simple CRC32 implementation (for embedded use without ESP32 dependency)
-static uint32_t crc32_table[256];
-static bool crc32_table_initialized = false;
-
-static void init_crc32_table(void) {
-    if (crc32_table_initialized) return;
-
-    uint32_t polynomial = 0xEDB88320;
-    for (uint32_t i = 0; i < 256; i++) {
-        uint32_t crc = i;
-        for (int j = 8; j > 0; j--) {
-            if (crc & 1) {
-                crc = (crc >> 1) ^ polynomial;
-            } else {
-                crc >>= 1;
-            }
-        }
-        crc32_table[i] = crc;
-    }
-    crc32_table_initialized = true;
-}
-
-static uint32_t calculate_crc32(const uint8_t *data, size_t length) {
-    init_crc32_table();
-
-    uint32_t crc = 0xFFFFFFFF;
-    for (size_t i = 0; i < length; i++) {
-        crc = crc32_table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
-    }
-    return crc ^ 0xFFFFFFFF;
-}
 
 // Optimized word decoding using lookup table
 static bool decode_word_optimized(const char *word, size_t word_len, uint8_t *output) {
@@ -214,7 +184,7 @@ bool bytewords_decode(bytewords_style_t style, const char *encoded, uint8_t **de
     memcpy(body, buf, body_size);
 
     // Verify checksum
-    uint32_t expected_crc = calculate_crc32(body, body_size);
+    uint32_t expected_crc = crc32_calculate(body, body_size);
     uint32_t received_crc = (buf[body_size] << 24) | (buf[body_size + 1] << 16) |
                            (buf[body_size + 2] << 8) | buf[body_size + 3];
 
@@ -240,7 +210,7 @@ bool bytewords_encode(bytewords_style_t style, const uint8_t *data, size_t data_
     if (!data || !encoded || data_len == 0) return false;
 
     // Calculate CRC32
-    uint32_t crc = calculate_crc32(data, data_len);
+    uint32_t crc = crc32_calculate(data, data_len);
 
     // Create buffer with data + CRC32 (4 bytes)
     size_t total_len = data_len + 4;
