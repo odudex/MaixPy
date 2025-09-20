@@ -410,6 +410,7 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
             }
         } else {
             decoder->last_error = UR_DECODER_ERROR_INVALID_CHECKSUM;
+            decoder->is_complete_flag = true;  // Complete with error
         }
     }
 

@@ -74,7 +74,7 @@ typedef struct fountain_decoder {
     // Simple parts storage (key: single index, value: data)
     struct {
         size_t *keys;
-        uint8_t **values;
+        decoder_part_t *values;
         size_t *value_lens;
         size_t count;
         size_t capacity;
@@ -83,7 +83,7 @@ typedef struct fountain_decoder {
     // Mixed parts storage (more complex, simplified for now)
     struct {
         part_indexes_t *key_sets;
-        uint8_t **values;
+        decoder_part_t *values;
         size_t *value_lens;
         size_t count;
         size_t capacity;

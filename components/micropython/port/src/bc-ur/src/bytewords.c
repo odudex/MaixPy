@@ -133,12 +133,12 @@ bool bytewords_decode(bytewords_style_t style, const char *encoded, uint8_t **de
 
     if (word_len == 4) {
         // Use separator-based splitting
-        words = safe_malloc(sizeof(char*) * 100); // Max 100 words
+        words = safe_malloc(sizeof(char*) * BYTEWORDS_MAX_WORDS);
         if (!words) return false;
-        num_words = str_split(encoded, separator, words, 100);
+        num_words = str_split(encoded, separator, words, BYTEWORDS_MAX_WORDS);
     } else {
         // Use fixed-length partitioning for minimal style
-        num_words = partition_string(encoded, word_len, &words, 100);
+        num_words = partition_string(encoded, word_len, &words, BYTEWORDS_MAX_WORDS);
     }
 
     if (num_words < 5) {
@@ -284,12 +284,12 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded, uint8_t 
 
     if (word_len == 4) {
         // Use separator-based splitting
-        words = safe_malloc(sizeof(char*) * 100); // Max 100 words
+        words = safe_malloc(sizeof(char*) * BYTEWORDS_MAX_WORDS);
         if (!words) return false;
-        num_words = str_split(encoded, separator, words, 100);
+        num_words = str_split(encoded, separator, words, BYTEWORDS_MAX_WORDS);
     } else {
         // Use fixed-length partitioning for minimal style
-        num_words = partition_string(encoded, word_len, &words, 100);
+        num_words = partition_string(encoded, word_len, &words, BYTEWORDS_MAX_WORDS);
     }
 
     if (num_words == 0) {
@@ -315,10 +315,29 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded, uint8_t 
         }
     }
 
-    // Return raw data (no CRC checking)
-    *decoded = buf;
-    *decoded_len = num_words;
+    // Return raw data without CRC (no CRC validation, but still strip the last 4 bytes)
+    if (num_words < 4) {
+        free(buf);
+        free_string_array(words, num_words);
+        free(words);
+        return false;
+    }
 
+    size_t body_size = num_words - 4;
+    uint8_t *body = safe_malloc(body_size);
+    if (!body) {
+        free(buf);
+        free_string_array(words, num_words);
+        free(words);
+        return false;
+    }
+
+    memcpy(body, buf, body_size);
+
+    *decoded = body;
+    *decoded_len = body_size;
+
+    free(buf);
     free_string_array(words, num_words);
     free(words);
     return true;

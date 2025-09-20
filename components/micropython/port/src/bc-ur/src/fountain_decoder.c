@@ -269,9 +269,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
     if (decoder->simple_parts.value_lens) free(decoder->simple_parts.value_lens);
     if (decoder->simple_parts.values) {
         for (size_t i = 0; i < decoder->simple_parts.count; i++) {
-            if (decoder->simple_parts.values[i]) {
-                free(decoder->simple_parts.values[i]);
-            }
+            decoder_part_free(&decoder->simple_parts.values[i]);
         }
         free(decoder->simple_parts.values);
     }
@@ -288,9 +286,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
     if (decoder->mixed_parts.value_lens) free(decoder->mixed_parts.value_lens);
     if (decoder->mixed_parts.values) {
         for (size_t i = 0; i < decoder->mixed_parts.count; i++) {
-            if (decoder->mixed_parts.values[i]) {
-                free(decoder->mixed_parts.values[i]);
-            }
+            decoder_part_free(&decoder->mixed_parts.values[i]);
         }
         free(decoder->mixed_parts.values);
     }
@@ -361,11 +357,20 @@ static bool add_simple_part(fountain_decoder_t *decoder, const decoder_part_t *p
         size_t new_capacity = decoder->simple_parts.capacity == 0 ? 8 : decoder->simple_parts.capacity * 2;
 
         size_t *new_keys = safe_realloc(decoder->simple_parts.keys, sizeof(size_t) * new_capacity);
-        uint8_t **new_values = safe_realloc(decoder->simple_parts.values, sizeof(uint8_t*) * new_capacity);
+        decoder_part_t *new_values = safe_realloc(decoder->simple_parts.values, sizeof(decoder_part_t) * new_capacity);
         size_t *new_lens = safe_realloc(decoder->simple_parts.value_lens, sizeof(size_t) * new_capacity);
 
         if (!new_keys || !new_values || !new_lens) {
             return false;
+        }
+
+        // Initialize new decoder_part_t structures
+        for (size_t i = decoder->simple_parts.capacity; i < new_capacity; i++) {
+            new_values[i].indexes.indexes = NULL;
+            new_values[i].indexes.count = 0;
+            new_values[i].indexes.capacity = 0;
+            new_values[i].data = NULL;
+            new_values[i].data_len = 0;
         }
 
         decoder->simple_parts.keys = new_keys;
@@ -374,24 +379,160 @@ static bool add_simple_part(fountain_decoder_t *decoder, const decoder_part_t *p
         decoder->simple_parts.capacity = new_capacity;
     }
 
-    // Copy data
-    uint8_t *data_copy = NULL;
-    if (part->data && part->data_len > 0) {
-        data_copy = safe_malloc(part->data_len);
-        if (!data_copy) return false;
-        memcpy(data_copy, part->data, part->data_len);
+    // Copy part to simple parts storage
+    decoder_part_t *stored_part = &decoder->simple_parts.values[decoder->simple_parts.count];
+    if (!decoder_part_copy(part, stored_part)) {
+        return false;
     }
 
     decoder->simple_parts.keys[decoder->simple_parts.count] = index;
-    decoder->simple_parts.values[decoder->simple_parts.count] = data_copy;
     decoder->simple_parts.value_lens[decoder->simple_parts.count] = part->data_len;
     decoder->simple_parts.count++;
 
     return true;
 }
 
-// TODO: This function would be used for mixed parts processing
-// static bool reduce_part_by_part(const decoder_part_t *a, const decoder_part_t *b, decoder_part_t *result)
+static bool reduce_part_by_part(const decoder_part_t *a, const decoder_part_t *b, decoder_part_t *result) {
+    if (!a || !b || !result) return false;
+    
+    // Check if b's indexes are a strict subset of a's indexes
+    if (part_indexes_is_strict_subset(&b->indexes, &a->indexes)) {
+        // Initialize result
+        result->indexes.indexes = NULL;
+        result->indexes.count = 0;
+        result->indexes.capacity = 0;
+        result->data = NULL;
+        result->data_len = 0;
+        
+        // Calculate set difference: a - b
+        if (!part_indexes_difference(&a->indexes, &b->indexes, &result->indexes)) {
+            return false;
+        }
+        
+        // XOR the data
+        result->data = safe_malloc(a->data_len);
+        if (!result->data) {
+            if (result->indexes.indexes) {
+                free(result->indexes.indexes);
+            }
+            return false;
+        }
+        
+        result->data_len = a->data_len;
+        const size_t count = a->data_len;
+        for (size_t i = 0; i < count; i++) {
+            result->data[i] = a->data[i] ^ b->data[i];
+        }
+        
+        return true;
+    } else {
+        // If b is not a subset of a, return a copy of a
+        return decoder_part_copy(a, result);
+    }
+}
+
+static bool add_mixed_part(fountain_decoder_t *decoder, const decoder_part_t *part) {
+    if (!decoder || !part || is_simple_part(part)) return false;
+    
+    // Check if already exists
+    for (size_t i = 0; i < decoder->mixed_parts.count; i++) {
+        if (part_indexes_equal(&decoder->mixed_parts.key_sets[i], &part->indexes)) {
+            return true; // Already exists
+        }
+    }
+    
+    // Expand arrays if needed
+    if (decoder->mixed_parts.count >= decoder->mixed_parts.capacity) {
+        size_t new_capacity = decoder->mixed_parts.capacity == 0 ? 8 : decoder->mixed_parts.capacity * 2;
+        
+        part_indexes_t *new_key_sets = safe_realloc(decoder->mixed_parts.key_sets, sizeof(part_indexes_t) * new_capacity);
+        decoder_part_t *new_values = safe_realloc(decoder->mixed_parts.values, sizeof(decoder_part_t) * new_capacity);
+        size_t *new_lens = safe_realloc(decoder->mixed_parts.value_lens, sizeof(size_t) * new_capacity);
+        
+        if (!new_key_sets || !new_values || !new_lens) {
+            return false;
+        }
+        
+        decoder->mixed_parts.key_sets = new_key_sets;
+        decoder->mixed_parts.values = new_values;
+        decoder->mixed_parts.value_lens = new_lens;
+        decoder->mixed_parts.capacity = new_capacity;
+    }
+    
+    // Initialize the new mixed part
+    decoder_part_t *mixed_part = &decoder->mixed_parts.values[decoder->mixed_parts.count];
+    mixed_part->indexes.indexes = NULL;
+    mixed_part->indexes.count = 0;
+    mixed_part->indexes.capacity = 0;
+    mixed_part->data = NULL;
+    mixed_part->data_len = 0;
+    
+    // Copy part data
+    if (!decoder_part_copy(part, mixed_part)) {
+        return false;
+    }
+    
+    // Copy indexes for key set
+    if (!part_indexes_copy(&part->indexes, &decoder->mixed_parts.key_sets[decoder->mixed_parts.count])) {
+        decoder_part_free(mixed_part);
+        return false;
+    }
+    
+    decoder->mixed_parts.value_lens[decoder->mixed_parts.count] = part->data_len;
+    decoder->mixed_parts.count++;
+    
+    return true;
+}
+
+static void reduce_mixed_by(fountain_decoder_t *decoder, const decoder_part_t *part) {
+    if (!decoder || !part) return;
+    
+    // Create temporary arrays to hold reduced parts
+    decoder_part_t *reduced_parts = safe_malloc(decoder->mixed_parts.count * sizeof(decoder_part_t));
+    if (!reduced_parts) return;
+    
+    size_t reduced_count = 0;
+    
+    // Reduce each mixed part by the given part
+    for (size_t i = 0; i < decoder->mixed_parts.count; i++) {
+        decoder_part_t *mixed_part = &decoder->mixed_parts.values[i];
+        decoder_part_t *reduced_part = &reduced_parts[reduced_count];
+        
+        // Initialize reduced part
+        reduced_part->indexes.indexes = NULL;
+        reduced_part->indexes.count = 0;
+        reduced_part->indexes.capacity = 0;
+        reduced_part->data = NULL;
+        reduced_part->data_len = 0;
+        
+        if (reduce_part_by_part(mixed_part, part, reduced_part)) {
+            reduced_count++;
+        }
+    }
+    
+    // Clear current mixed parts
+    for (size_t i = 0; i < decoder->mixed_parts.count; i++) {
+        decoder_part_free(&decoder->mixed_parts.values[i]);
+        if (decoder->mixed_parts.key_sets[i].indexes) {
+            free(decoder->mixed_parts.key_sets[i].indexes);
+        }
+    }
+    decoder->mixed_parts.count = 0;
+    
+    // Process reduced parts
+    for (size_t i = 0; i < reduced_count; i++) {
+        if (is_simple_part(&reduced_parts[i])) {
+            // Add to queue for processing
+            queue_enqueue(&decoder->queue, &reduced_parts[i]);
+        } else {
+            // Add back to mixed parts
+            add_mixed_part(decoder, &reduced_parts[i]);
+        }
+        decoder_part_free(&reduced_parts[i]);
+    }
+    
+    free(reduced_parts);
+}
 
 static void process_simple_part(fountain_decoder_t *decoder, const decoder_part_t *part) {
     if (!decoder || !part || !is_simple_part(part)) return;
@@ -445,8 +586,8 @@ static void process_simple_part(fountain_decoder_t *decoder, const decoder_part_
         // Populate the array
         for (size_t i = 0; i < part_count; i++) {
             sorted_fragments[i].index = decoder->simple_parts.keys[i];
-            sorted_fragments[i].data = decoder->simple_parts.values[i];
-            sorted_fragments[i].len = decoder->simple_parts.value_lens[i];
+            sorted_fragments[i].data = decoder->simple_parts.values[i].data;
+            sorted_fragments[i].len = decoder->simple_parts.values[i].data_len;
         }
 
         // Sort by index (simple bubble sort for small arrays)

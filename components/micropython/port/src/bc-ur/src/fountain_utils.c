@@ -4,6 +4,15 @@
 #include <string.h>
 #include <math.h>
 
+// Comparison function for qsort
+static int compare_size_t(const void *a, const void *b) {
+    size_t arg1 = *(const size_t*)a;
+    size_t arg2 = *(const size_t*)b;
+    if (arg1 < arg2) return -1;
+    if (arg1 > arg2) return 1;
+    return 0;
+}
+
 // Simplified Xoshiro256** implementation
 static uint64_t rotl(const uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
@@ -154,7 +163,8 @@ bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b, p
             }
         }
     }
-
+    // After populating result->indexes
+    qsort(result->indexes, result->count, sizeof(size_t), compare_size_t);
     return true;
 }
 
@@ -191,18 +201,30 @@ bool join_fragments(uint8_t **fragments, size_t *fragment_lens, size_t fragment_
                    size_t message_len, uint8_t *result) {
     if (!fragments || !fragment_lens || !result || fragment_count == 0) return false;
 
-    size_t offset = 0;
-    for (size_t i = 0; i < fragment_count && offset < message_len; i++) {
-        if (!fragments[i] || fragment_lens[i] == 0) continue;
-
-        size_t copy_len = fragment_lens[i];
-        if (offset + copy_len > message_len) {
-            copy_len = message_len - offset;
+    // First, concatenate all fragments completely (like Python)
+    size_t total_len = 0;
+    for (size_t i = 0; i < fragment_count; i++) {
+        if (fragments[i] && fragment_lens[i] > 0) {
+            total_len += fragment_lens[i];
         }
-
-        memcpy(result + offset, fragments[i], copy_len);
-        offset += copy_len;
     }
 
-    return offset <= message_len;
+    // Create temporary buffer for complete concatenation
+    uint8_t *temp_buffer = safe_malloc(total_len);
+    if (!temp_buffer) return false;
+
+    size_t offset = 0;
+    for (size_t i = 0; i < fragment_count; i++) {
+        if (fragments[i] && fragment_lens[i] > 0) {
+            memcpy(temp_buffer + offset, fragments[i], fragment_lens[i]);
+            offset += fragment_lens[i];
+        }
+    }
+
+    // Then truncate to message_len (like Python's take_first)
+    size_t copy_len = (total_len < message_len) ? total_len : message_len;
+    memcpy(result, temp_buffer, copy_len);
+
+    free(temp_buffer);
+    return true;
 }
