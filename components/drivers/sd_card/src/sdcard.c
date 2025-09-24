@@ -1,12 +1,11 @@
 #include "sdcard.h"
-#include "sysctl.h"
-#include "gpiohs.h"
-#include "fpioa.h"
 #include "dmac.h"
-#include "spi.h"
-#include <stdio.h>
+#include "fpioa.h"
+#include "global_config.h"
 #include "gpiohs.h"
 #include "sleep.h"
+#include "spi.h"
+#include "sysctl.h"
 #include "syslog.h"
 #include "utils.h"
 #include "global_config.h"
@@ -17,10 +16,14 @@
  *         Tokens (necessary because at nop/idle (and CS active) only 0xff is
  *         on the data/command line)
  */
-#define SD_START_DATA_SINGLE_BLOCK_READ 0xFE    /*!< Data token start byte, Start Single Block Read */
-#define SD_START_DATA_MULTIPLE_BLOCK_READ 0xFE  /*!< Data token start byte, Start Multiple Block Read */
-#define SD_START_DATA_SINGLE_BLOCK_WRITE 0xFE   /*!< Data token start byte, Start Single Block Write */
-#define SD_START_DATA_MULTIPLE_BLOCK_WRITE 0xFC /*!< Data token start byte, Start Multiple Block Write */
+/*!< Data token start byte, Start Single Block Read */
+#define SD_START_DATA_SINGLE_BLOCK_READ 0xFE
+/*!< Data token start byte, Start Multiple Block Read */
+#define SD_START_DATA_MULTIPLE_BLOCK_READ 0xFE
+/*!< Data token start byte, Start Single Block Write */
+#define SD_START_DATA_SINGLE_BLOCK_WRITE 0xFE
+/*!< Data token start byte, Start Multiple Block Write */
+#define SD_START_DATA_MULTIPLE_BLOCK_WRITE 0xFC
 
 /*
  * @brief  Commands: CMDxx = CMD-number | 0x40
@@ -41,7 +44,8 @@
 #define SD_CMD58 58  /*!< CMD58 = 0x58 */
 #define SD_CMD59 59  /*!< CMD59 = 0x59 */
 
-sdcard_config_t config = { // see struct sdcard_config_t
+sdcard_config_t config = {
+// see struct sdcard_config_t
 #ifdef CONFIG_BOARD_M5STICK
     33, 31, 30, 32, SD_CS_PIN,
 #else
@@ -52,25 +56,13 @@ sdcard_config_t config = { // see struct sdcard_config_t
 SD_CardInfo cardinfo;
 int sd_version = 0;
 
-void SD_CS_HIGH(void)
-{
-    gpiohs_set_pin(config.cs_gpio_num, GPIO_PV_HIGH);
-}
+void SD_CS_HIGH(void) { gpiohs_set_pin(config.cs_gpio_num, GPIO_PV_HIGH); }
 
-void SD_CS_LOW(void)
-{
-    gpiohs_set_pin(config.cs_gpio_num, GPIO_PV_LOW);
-}
+void SD_CS_LOW(void) { gpiohs_set_pin(config.cs_gpio_num, GPIO_PV_LOW); }
 
-void SD_HIGH_SPEED_ENABLE(void)
-{
-    spi_set_clk_rate(SD_SPI_DEVICE, 25000000);
-}
+void SD_HIGH_SPEED_ENABLE(void) { spi_set_clk_rate(SD_SPI_DEVICE, 25000000); }
 
-void SD_LOW_SPEED_ENABLE(void)
-{
-    spi_set_clk_rate(SD_SPI_DEVICE, 400000);
-}
+void SD_LOW_SPEED_ENABLE(void) { spi_set_clk_rate(SD_SPI_DEVICE, 400000); }
 
 /*
  * @brief  Calculate CRC-7 for SD card commands
@@ -78,65 +70,61 @@ void SD_LOW_SPEED_ENABLE(void)
  * @param  arg: The 32-bit argument
  * @retval The calculated CRC-7 value (with stop bit)
  */
-static uint8_t sd_calculate_crc7(uint8_t cmd, uint32_t arg)
-{
-    uint8_t crc = 0;
-    uint8_t data[5];
+static uint8_t sd_calculate_crc7(uint8_t cmd, uint32_t arg) {
+  uint8_t crc = 0;
+  uint8_t data[5];
 
-    // Construct the 5-byte command
-    data[0] = cmd | 0x40;
-    data[1] = (uint8_t)(arg >> 24);
-    data[2] = (uint8_t)(arg >> 16);
-    data[3] = (uint8_t)(arg >> 8);
-    data[4] = (uint8_t)(arg);
+  // Construct the 5-byte command
+  data[0] = cmd | 0x40;
+  data[1] = (uint8_t)(arg >> 24);
+  data[2] = (uint8_t)(arg >> 16);
+  data[3] = (uint8_t)(arg >> 8);
+  data[4] = (uint8_t)(arg);
 
-    // Calculate CRC-7 over the 5 bytes (40 bits)
-    for (int i = 0; i < 5; i++) {
-        for (int j = 7; j >= 0; j--) {
-            crc <<= 1;
-            if (((data[i] >> j) & 1) ^ ((crc >> 7) & 1)) {
-                crc ^= 0x09;  // Polynomial: x^7 + x^3 + 1
-            }
-        }
+  // Calculate CRC-7 over the 5 bytes (40 bits)
+  for (int i = 0; i < 5; i++) {
+    for (int j = 7; j >= 0; j--) {
+      crc <<= 1;
+      if (((data[i] >> j) & 1) ^ ((crc >> 7) & 1)) {
+        crc ^= 0x09; // Polynomial: x^7 + x^3 + 1
+      }
     }
+  }
 
-    uint8_t result = ((crc & 0x7F) << 1) | 0x01;
-
-    // Return CRC-7 shifted left by 1 with stop bit (LSB = 1)
-    return result;
+  // Return CRC-7 shifted left by 1 with stop bit (LSB = 1)
+  return ((crc & 0x7F) << 1) | 0x01;
 }
 
-static void sd_lowlevel_init(uint8_t spi_index)
-{
-    gpiohs_set_drive_mode(config.cs_gpio_num, GPIO_DM_OUTPUT);
-    spi_set_clk_rate(SD_SPI_DEVICE, 200000); /*set clk rate*/
+static void sd_lowlevel_init(uint8_t spi_index) {
+  gpiohs_set_drive_mode(config.cs_gpio_num, GPIO_DM_OUTPUT);
+  spi_set_clk_rate(SD_SPI_DEVICE, 200000); /*set clk rate*/
 }
 
-static void sd_write_data(uint8_t *data_buff, uint32_t length)
-{
-    spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
-    spi_send_data_standard(SD_SPI_DEVICE, SD_SS, NULL, 0, data_buff, length);
+static void sd_write_data(uint8_t *data_buff, uint32_t length) {
+  spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
+  spi_send_data_standard(SD_SPI_DEVICE, SD_SS, NULL, 0, data_buff, length);
 }
 
-static void sd_read_data(uint8_t *data_buff, uint32_t length)
-{
+static void sd_read_data(uint8_t *data_buff, uint32_t length) {
 
-    spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
-    spi_receive_data_standard(SD_SPI_DEVICE, SD_SS, NULL, 0, data_buff, length);
+  spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
+  spi_receive_data_standard(SD_SPI_DEVICE, SD_SS, NULL, 0, data_buff, length);
 }
 
-static void sd_write_data_dma(uint8_t *data_buff)
-{
-    // spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 32, 1); misaligned error
-    spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
-    spi_send_data_standard_dma(SD_DMA_CH, SD_SPI_DEVICE, SD_SS, NULL, 0, (uint8_t *)(data_buff), 128 * 4);
+static void sd_write_data_dma(uint8_t *data_buff) {
+  // spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 32, 1);
+  // misaligned error
+  spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
+  spi_send_data_standard_dma(SD_DMA_CH, SD_SPI_DEVICE, SD_SS, NULL, 0,
+                             (uint8_t *)(data_buff), 128 * 4);
 }
 
-static void sd_read_data_dma(uint8_t *data_buff)
-{
-    // spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 32, 1); misaligned error
-    spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
-    spi_receive_data_standard_dma(-1, SD_DMA_CH, SD_SPI_DEVICE, SD_SS, NULL, 0, data_buff, 128 * 4);
+static void sd_read_data_dma(uint8_t *data_buff) {
+  // spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 32, 1);
+  // misaligned error
+  spi_init(SD_SPI_DEVICE, SPI_WORK_MODE_0, SPI_FF_STANDARD, 8, 0);
+  spi_receive_data_standard_dma(-1, SD_DMA_CH, SD_SPI_DEVICE, SD_SS, NULL, 0,
+                                data_buff, 128 * 4);
 }
 
 /*
@@ -176,13 +164,12 @@ static void sd_send_cmd(uint8_t cmd, uint32_t arg)
  * @param  Crc: The CRC.
  * @retval None
  */
-static void sd_end_cmd(void)
-{
-    uint8_t frame[1] = {0xFF};
-    /*!< SD chip select high */
-    SD_CS_HIGH();
-    /*!< Send the Cmd bytes */
-    sd_write_data(frame, 1);
+static void sd_end_cmd(void) {
+  uint8_t frame[1] = {0xFF};
+  /*!< SD chip select high */
+  SD_CS_HIGH();
+  /*!< Send the Cmd bytes */
+  sd_write_data(frame, 1);
 }
 
 /*
@@ -218,21 +205,20 @@ static uint8_t sd_get_response(void)
  *         - status 110: Data rejected due to a Write error.
  *         - status 111: Data rejected due to other error.
  */
-static uint8_t sd_get_dataresponse(void)
-{
-    uint8_t response;
-    /*!< Read resonse */
+static uint8_t sd_get_dataresponse(void) {
+  uint8_t response;
+  /*!< Read resonse */
+  sd_read_data(&response, 1);
+  /*!< Mask unused bits */
+  response &= 0x1F;
+  if (response != 0x05)
+    return 0xFF;
+  /*!< Wait null data */
+  sd_read_data(&response, 1);
+  while (response == 0)
     sd_read_data(&response, 1);
-    /*!< Mask unused bits */
-    response &= 0x1F;
-    if (response != 0x05)
-        return 0xFF;
-    /*!< Wait null data */
-    sd_read_data(&response, 1);
-    while (response == 0)
-        sd_read_data(&response, 1);
-    /*!< Return response */
-    return 0;
+  /*!< Return response */
+  return 0;
 }
 
 /*
@@ -450,28 +436,27 @@ static uint8_t sd_get_cardinfo(SD_CardInfo *cardinfo)
  *         - 0xFF: Sequence failed
  *         - 0: Sequence succeed
  */
-uint8_t sd_init(void)
-{
-    uint8_t frame[10], index, result;
-    cardinfo.active = 0;
+uint8_t sd_init(void) {
+  uint8_t frame[10], index, result;
+  cardinfo.active = 0;
 
-    fpioa_set_function(config.sclk_pin, FUNC_SPI1_SCLK);
-    fpioa_set_function(config.mosi_pin, FUNC_SPI1_D0);
-    fpioa_set_function(config.miso_pin, FUNC_SPI1_D1);
-    fpioa_set_function(config.cs_pin, FUNC_GPIOHS0 + config.cs_gpio_num);
+  fpioa_set_function(config.sclk_pin, FUNC_SPI1_SCLK);
+  fpioa_set_function(config.mosi_pin, FUNC_SPI1_D0);
+  fpioa_set_function(config.miso_pin, FUNC_SPI1_D1);
+  fpioa_set_function(config.cs_pin, FUNC_GPIOHS0 + config.cs_gpio_num);
 
-    /*!< Initialize SD_SPI */
-    sd_lowlevel_init(0);
-    /*!< SD chip select high */
-    SD_CS_HIGH();
-    /*!< Send dummy byte 0xFF, 10 times with CS high */
-    /*!< Rise CS and MOSI for 80 clocks cycles */
-    /*!< Send dummy byte 0xFF */
-    for (index = 0; index < 10; index++)
-        frame[index] = 0xFF;
-    sd_write_data(frame, 10);
-    /*------------Put SD in SPI mode--------------*/
-    /*!< SD initialized and set to SPI mode properly */
+  /*!< Initialize SD_SPI */
+  sd_lowlevel_init(0);
+  /*!< SD chip select high */
+  SD_CS_HIGH();
+  /*!< Send dummy byte 0xFF, 10 times with CS high */
+  /*!< Rise CS and MOSI for 80 clocks cycles */
+  /*!< Send dummy byte 0xFF */
+  for (index = 0; index < 10; index++)
+    frame[index] = 0xFF;
+  sd_write_data(frame, 10);
+  /*------------Put SD in SPI mode--------------*/
+  /*!< SD initialized and set to SPI mode properly */
 
     sd_send_cmd(SD_CMD0, 0);
     result = sd_get_response();
@@ -526,7 +511,7 @@ uint8_t sd_init(void)
     if ((frame[0] & 0x40) == 0)
     {
 #if CONFIG_SPI_SD_CARD_FORCE_HIGH_SPEED
-        SD_HIGH_SPEED_ENABLE();
+    SD_HIGH_SPEED_ENABLE();
 #endif
         sd_version = 1;
     }
@@ -562,47 +547,41 @@ uint8_t sd_init(void)
  *         - 0xFF: Sequence failed
  *         - 0: Sequence succeed
  */
-uint8_t sd_read_sector(uint8_t *data_buff, uint32_t sector, uint32_t count)
-{
-    uint8_t frame[2], flag;
-    /*!< Send CMD17 (SD_CMD17) to read one block */
-    if (count == 1)
-    {
-        flag = 0;
-        sd_send_cmd(SD_CMD17, sector);
-    }
-    else
-    {
-        flag = 1;
-        sd_send_cmd(SD_CMD18, sector);
-    }
-    /*!< Check if the SD acknowledged the read block command: R1 response (0x00: no errors) */
-    if (sd_get_response() != 0x00)
-    {
-        sd_end_cmd();
-        return 0xFF;
-    }
-    while (count)
-    {
-        if (sd_get_response() != SD_START_DATA_SINGLE_BLOCK_READ)
-            break;
-        /*!< Read the SD block data : read NumByteToRead data */
-        sd_read_data(data_buff, 512);
-        /*!< Get CRC bytes (not really needed by us, but required by SD) */
-        sd_read_data(frame, 2);
-        data_buff += 512;
-        count--;
-    }
+uint8_t sd_read_sector(uint8_t *data_buff, uint32_t sector, uint32_t count) {
+  uint8_t frame[2], flag;
+  /*!< Send CMD17 (SD_CMD17) to read one block */
+  if (count == 1) {
+    flag = 0;
+    sd_send_cmd(SD_CMD17, sector);
+  } else {
+    flag = 1;
+    sd_send_cmd(SD_CMD18, sector);
+  }
+  /*!< Check if the SD acknowledged the read block command: R1 response (0x00:
+   * no errors) */
+  if (sd_get_response() != 0x00) {
     sd_end_cmd();
-    if (flag)
-    {
-        sd_send_cmd(SD_CMD12, 0);
-        sd_get_response();
-        sd_end_cmd();
-        sd_end_cmd();
-    }
-    /*!< Returns the reponse */
-    return count > 0 ? 0xFF : 0;
+    return 0xFF;
+  }
+  while (count) {
+    if (sd_get_response() != SD_START_DATA_SINGLE_BLOCK_READ)
+      break;
+    /*!< Read the SD block data : read NumByteToRead data */
+    sd_read_data(data_buff, 512);
+    /*!< Get CRC bytes (not really needed by us, but required by SD) */
+    sd_read_data(frame, 2);
+    data_buff += 512;
+    count--;
+  }
+  sd_end_cmd();
+  if (flag) {
+    sd_send_cmd(SD_CMD12, 0);
+    sd_get_response();
+    sd_end_cmd();
+    sd_end_cmd();
+  }
+  /*!< Returns the reponse */
+  return count > 0 ? 0xFF : 0;
 }
 
 /*
@@ -614,49 +593,43 @@ uint8_t sd_read_sector(uint8_t *data_buff, uint32_t sector, uint32_t count)
  *         - 0xFF: Sequence failed
  *         - 0: Sequence succeed
  */
-uint8_t sd_write_sector(uint8_t *data_buff, uint32_t sector, uint32_t count)
-{
-    configASSERT(((uint32_t)data_buff) % 4 == 0);
-    uint8_t frame[2] = {0xFF};
-    if (count == 1)
-    {
-        frame[1] = SD_START_DATA_SINGLE_BLOCK_WRITE;
-        sd_send_cmd(SD_CMD24, sector);
-    }
-    else
-    {
-        frame[1] = SD_START_DATA_MULTIPLE_BLOCK_WRITE;
-        sd_send_cmd(SD_ACMD23, count);
-        sd_get_response();
-        sd_end_cmd();
-        sd_send_cmd(SD_CMD25, sector);
-    }
-    /*!< Check if the SD acknowledged the write block command: R1 response (0x00: no errors) */
-    if (sd_get_response() != 0x00)
-    {
-        sd_end_cmd();
-        return 0xFF;
-    }
-    while (count--)
-    {
-        /*!< Send the data token to signify the start of the data */
-        sd_write_data(frame, 2);
-        /*!< Write the block data to SD : write count data by block */
-        sd_write_data(data_buff, 512);
-        /*!< Put CRC bytes (not really needed by us, but required by SD) */
-        sd_write_data(frame, 2);
-        data_buff += 512;
-        /*!< Read data response */
-        if (sd_get_dataresponse() != 0x00)
-        {
-            sd_end_cmd();
-            return 0xFF;
-        }
-    }
+uint8_t sd_write_sector(uint8_t *data_buff, uint32_t sector, uint32_t count) {
+  configASSERT(((uint32_t)data_buff) % 4 == 0);
+  uint8_t frame[2] = {0xFF};
+  if (count == 1) {
+    frame[1] = SD_START_DATA_SINGLE_BLOCK_WRITE;
+    sd_send_cmd(SD_CMD24, sector);
+  } else {
+    frame[1] = SD_START_DATA_MULTIPLE_BLOCK_WRITE;
+    sd_send_cmd(SD_ACMD23, count);
+    sd_get_response();
     sd_end_cmd();
+    sd_send_cmd(SD_CMD25, sector);
+  }
+  /*!< Check if the SD acknowledged the write block command: R1 response (0x00:
+   * no errors) */
+  if (sd_get_response() != 0x00) {
     sd_end_cmd();
-    /*!< Returns the reponse */
-    return 0;
+    return 0xFF;
+  }
+  while (count--) {
+    /*!< Send the data token to signify the start of the data */
+    sd_write_data(frame, 2);
+    /*!< Write the block data to SD : write count data by block */
+    sd_write_data(data_buff, 512);
+    /*!< Put CRC bytes (not really needed by us, but required by SD) */
+    sd_write_data(frame, 2);
+    data_buff += 512;
+    /*!< Read data response */
+    if (sd_get_dataresponse() != 0x00) {
+      sd_end_cmd();
+      return 0xFF;
+    }
+  }
+  sd_end_cmd();
+  sd_end_cmd();
+  /*!< Returns the reponse */
+  return 0;
 }
 
 uint8_t sd_read_sector_dma(uint8_t *data_buff, uint32_t sector, uint32_t count)
@@ -705,45 +678,43 @@ uint8_t sd_read_sector_dma(uint8_t *data_buff, uint32_t sector, uint32_t count)
     return count > 0 ? 0xFF : 0;
 }
 
-uint8_t sd_write_sector_dma(uint8_t *data_buff, uint32_t sector, uint32_t count)
-{
-    uint8_t frame[2] = {0xFF};
-    uint32_t shift = 0;
-    frame[1] = SD_START_DATA_SINGLE_BLOCK_WRITE;
-    uint32_t i = 0;
+uint8_t sd_write_sector_dma(uint8_t *data_buff, uint32_t sector,
+                            uint32_t count) {
+  uint8_t frame[2] = {0xFF};
+  uint32_t shift = 0;
+  frame[1] = SD_START_DATA_SINGLE_BLOCK_WRITE;
+  uint32_t i = 0;
+  if (1 == sd_version)
+    sector = sector << 9;
+  while (count--) {
     if (1 == sd_version)
-        sector = sector << 9;
-    while (count--)
-    {
-        if (1 == sd_version)
-            shift = i << 9;
-        else
-            shift = i;
-        sd_send_cmd(SD_CMD24, sector + shift);
-        /*!< Check if the SD acknowledged the write block command: R1 response (0x00: no errors) */
-        if (sd_get_response() != 0x00)
-        {
-            sd_end_cmd();
-            return 0xFF;
-        }
-
-        /*!< Send the data token to signify the start of the data */
-        sd_write_data(frame, 2);
-        /*!< Write the block data to SD : write count data by block */
-        sd_write_data_dma(data_buff);
-        /*!< Put CRC bytes (not really needed by us, but required by SD) */
-        sd_write_data(frame, 2);
-        data_buff += 512;
-        /*!< Read data response */
-        if (sd_get_dataresponse() != 0x00)
-        {
-            sd_end_cmd();
-            return 0xFF;
-        }
-        i++;
+      shift = i << 9;
+    else
+      shift = i;
+    sd_send_cmd(SD_CMD24, sector + shift);
+    /*!< Check if the SD acknowledged the write block command: R1 response
+     * (0x00: no errors) */
+    if (sd_get_response() != 0x00) {
+      sd_end_cmd();
+      return 0xFF;
     }
-    sd_end_cmd();
-    sd_end_cmd();
-    /*!< Returns the reponse */
-    return 0;
+
+    /*!< Send the data token to signify the start of the data */
+    sd_write_data(frame, 2);
+    /*!< Write the block data to SD : write count data by block */
+    sd_write_data_dma(data_buff);
+    /*!< Put CRC bytes (not really needed by us, but required by SD) */
+    sd_write_data(frame, 2);
+    data_buff += 512;
+    /*!< Read data response */
+    if (sd_get_dataresponse() != 0x00) {
+      sd_end_cmd();
+      return 0xFF;
+    }
+    i++;
+  }
+  sd_end_cmd();
+  sd_end_cmd();
+  /*!< Returns the reponse */
+  return 0;
 }
