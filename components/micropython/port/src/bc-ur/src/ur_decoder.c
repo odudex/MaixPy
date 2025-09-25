@@ -130,16 +130,21 @@ static ur_result_t *decode_single_part(const char *type, const char *body) {
 }
 
 bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
+    printf("DEBUG: ur_decoder_receive_part entered\n");
+
     if (!decoder || !part_str) {
+        printf("DEBUG: NULL pointer check failed\n");
         if (decoder) decoder->last_error = UR_DECODER_ERROR_NULL_POINTER;
         return false;
     }
 
     // Don't process if already complete
     if (decoder->is_complete_flag) {
+        printf("DEBUG: decoder already complete\n");
         return false;
     }
 
+    printf("DEBUG: about to parse UR string: %.50s\n", part_str);
     decoder->last_error = UR_DECODER_OK;
 
     // Parse UR string
@@ -147,25 +152,34 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     char **components;
     size_t component_count;
 
+    printf("DEBUG: calling parse_ur_string\n");
     if (!parse_ur_string(part_str, &type, &components, &component_count)) {
+        printf("DEBUG: parse_ur_string failed\n");
         decoder->last_error = UR_DECODER_ERROR_INVALID_SCHEME;
         return false;
     }
+    printf("DEBUG: parse_ur_string succeeded, component_count=%u\n", component_count);
 
     // Validate part type
+    printf("DEBUG: validating part type\n");
     if (!validate_part_type(decoder, type)) {
+        printf("DEBUG: validate_part_type failed\n");
         free(type);
         free_string_array(components, component_count);
         free(components);
         return false;
     }
+    printf("DEBUG: part type validated successfully\n");
 
     // Handle single-part UR
     if (component_count == 1) {
+        printf("DEBUG: handling single-part UR\n");
         decoder->result = decode_single_part(type, components[0]);
         if (decoder->result) {
+            printf("DEBUG: single-part decode succeeded\n");
             decoder->is_complete_flag = true;
         } else {
+            printf("DEBUG: single-part decode failed\n");
             decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
         }
 
@@ -176,7 +190,9 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
 
     // Handle multi-part UR
+    printf("DEBUG: handling multi-part UR\n");
     if (component_count != 2) {
+        printf("DEBUG: invalid component count: %u\n", component_count);
         decoder->last_error = UR_DECODER_ERROR_INVALID_PATH_LENGTH;
         free(type);
         free_string_array(components, component_count);
@@ -185,30 +201,38 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
 
     // Parse sequence component
+    printf("DEBUG: parsing sequence component\n");
     uint32_t seq_num;
     size_t seq_len;
     if (!parse_sequence_component(components[0], &seq_num, &seq_len)) {
+        printf("DEBUG: parse_sequence_component failed\n");
         decoder->last_error = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
         free(type);
         free_string_array(components, component_count);
         free(components);
         return false;
     }
+    printf("DEBUG: sequence parsed: seq_num=%u, seq_len=%u\n", seq_num, seq_len);
 
     // Decode fragment (raw, no CRC validation)
+    printf("DEBUG: decoding bytewords\n");
     uint8_t *cbor_data;
     size_t cbor_len;
     if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, components[1], &cbor_data, &cbor_len)) {
+        printf("DEBUG: bytewords_decode_raw failed\n");
         decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
         free(type);
         free_string_array(components, component_count);
         free(components);
         return false;
     }
+    printf("DEBUG: bytewords decoded, cbor_len=%u\n", cbor_len);
 
     // Parse CBOR to extract fountain part data
     // CBOR format: [seq_num, seq_len, message_len, checksum, fragment_data]
+    printf("DEBUG: starting CBOR parsing\n");
     if (cbor_len < 5) {
+        printf("DEBUG: cbor_len too small: %u\n", cbor_len);
         decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
         free(cbor_data);
         free(type);
@@ -223,7 +247,9 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     size_t remaining = cbor_len;
 
     // Check for CBOR array marker (0x85 = array of 5 elements)
+    printf("DEBUG: checking CBOR array marker, first byte: 0x%02X\n", cbor_ptr[0]);
     if (remaining < 1 || cbor_ptr[0] != 0x85) {
+        printf("DEBUG: invalid CBOR array marker\n");
         decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
         free(cbor_data);
         free(type);
@@ -235,10 +261,12 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     remaining--;
 
     // Parse and extract values: seq_num, seq_len, message_len, checksum
+    printf("DEBUG: parsing CBOR values\n");
     uint32_t cbor_seq_num = 0, cbor_seq_len = 0, cbor_message_len = 0, cbor_checksum = 0;
     uint32_t *values[] = {&cbor_seq_num, &cbor_seq_len, &cbor_message_len, &cbor_checksum};
 
     for (int i = 0; i < 4; i++) {
+        printf("DEBUG: parsing CBOR value %d\n", i);
         if (remaining < 1) {
             decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
             free(cbor_data);
@@ -349,8 +377,10 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
 
     // Extract the actual fragment data
+    printf("DEBUG: extracting fragment data, fragment_len=%u\n", fragment_len);
     uint8_t *fragment_data = safe_malloc(fragment_len);
     if (!fragment_data) {
+        printf("DEBUG: failed to allocate fragment_data\n");
         decoder->last_error = UR_DECODER_ERROR_MEMORY;
         free(cbor_data);
         free(type);
@@ -359,12 +389,17 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
         return false;
     }
     memcpy(fragment_data, cbor_ptr, fragment_len);
+    printf("DEBUG: fragment data copied\n");
 
     // Create fountain part with extracted fragment data and checksum
+    printf("DEBUG: creating fountain part\n");
     fountain_encoder_part_t *part = create_fountain_part_from_cbor(fragment_data, fragment_len, seq_num, seq_len);
     if (part) {
         part->message_len = cbor_message_len;
         part->checksum = cbor_checksum;
+        printf("DEBUG: fountain part created successfully\n");
+    } else {
+        printf("DEBUG: failed to create fountain part\n");
     }
     free(fragment_data);
     free(cbor_data);
@@ -378,10 +413,13 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
 
     // Process part in fountain decoder
+    printf("DEBUG: processing part in fountain decoder\n");
     bool success = fountain_decoder_receive_part(decoder->fountain_decoder, part);
+    printf("DEBUG: fountain_decoder_receive_part returned: %s\n", success ? "true" : "false");
     free_fountain_part(part);
 
     if (!success) {
+        printf("DEBUG: fountain decoder failed to process part\n");
         decoder->last_error = UR_DECODER_ERROR_INVALID_PART;
         free(type);
         free_string_array(components, component_count);
@@ -390,14 +428,18 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     }
 
     // Check if fountain decoder is complete
+    printf("DEBUG: checking if fountain decoder is complete\n");
     if (fountain_decoder_is_complete(decoder->fountain_decoder)) {
+        printf("DEBUG: fountain decoder is complete\n");
         if (fountain_decoder_is_success(decoder->fountain_decoder)) {
+            printf("DEBUG: fountain decoder success, creating result\n");
             // Create result from fountain decoder
             decoder->result = safe_malloc(sizeof(ur_result_t));
             if (decoder->result) {
                 decoder->result->type = safe_strdup(type);
                 size_t result_len = fountain_decoder_result_message_len(decoder->fountain_decoder);
                 uint8_t *result_data = fountain_decoder_result_message(decoder->fountain_decoder);
+                printf("DEBUG: result_len=%u, result_data=%p\n", result_len, (void*)result_data);
 
                 if (result_data && result_len > 0) {
                     decoder->result->cbor_data = safe_malloc(result_len);
@@ -405,18 +447,30 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
                         memcpy(decoder->result->cbor_data, result_data, result_len);
                         decoder->result->cbor_len = result_len;
                         decoder->is_complete_flag = true;
+                        printf("DEBUG: result created successfully\n");
+                    } else {
+                        printf("DEBUG: failed to allocate result cbor_data\n");
                     }
+                } else {
+                    printf("DEBUG: invalid result data or length\n");
                 }
+            } else {
+                printf("DEBUG: failed to allocate result structure\n");
             }
         } else {
+            printf("DEBUG: fountain decoder completed with error\n");
             decoder->last_error = UR_DECODER_ERROR_INVALID_CHECKSUM;
             decoder->is_complete_flag = true;  // Complete with error
         }
+    } else {
+        printf("DEBUG: fountain decoder not yet complete\n");
     }
 
+    printf("DEBUG: cleaning up and returning\n");
     free(type);
     free_string_array(components, component_count);
     free(components);
+    printf("DEBUG: ur_decoder_receive_part complete, returning %s\n", success ? "true" : "false");
     return success;
 }
 

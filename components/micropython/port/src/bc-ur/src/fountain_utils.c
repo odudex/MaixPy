@@ -1,8 +1,18 @@
 #include "fountain_utils.h"
 #include "utils.h"
+#include "sha256/sha256.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
+
+// Proper SHA256 hash function to match Python's hashlib behavior
+static void compute_sha256(const uint8_t *input, size_t len, uint8_t output[32]) {
+    CRYAL_SHA256_CTX ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, input, len);
+    sha256_final(&ctx, output);
+}
 
 // Comparison function for qsort
 static int compare_size_t(const void *a, const void *b) {
@@ -38,6 +48,23 @@ void prng_init(prng_state_t *prng, const uint8_t seed[8]) {
     }
 }
 
+void prng_init_from_bytes(prng_state_t *prng, const uint8_t *seed, size_t seed_len) {
+    if (!prng || !seed) return;
+
+    uint8_t hash[32];
+    compute_sha256(seed, seed_len, hash);
+
+
+    // Initialize state from hash - use first 32 bytes as 4 uint64_t values
+    for (int i = 0; i < 4; i++) {
+        prng->state[i] = 0;
+        for (int j = 0; j < 8; j++) {
+            prng->state[i] <<= 8;
+            prng->state[i] |= hash[i * 8 + j];
+        }
+    }
+}
+
 static uint64_t prng_next_uint64(prng_state_t *prng) {
     const uint64_t result = rotl(prng->state[1] * 5, 7) * 9;
     const uint64_t t = prng->state[1] << 17;
@@ -56,45 +83,193 @@ static uint64_t prng_next_uint64(prng_state_t *prng) {
 uint32_t prng_next_int(prng_state_t *prng, uint32_t min, uint32_t max) {
     if (!prng || min > max) return min;
 
-    uint64_t range = max - min + 1;
-    uint64_t val = prng_next_uint64(prng);
-    return min + (uint32_t)(val % range);
+    // int(next_double() * (high - low + 1) + low)
+    double range = (double)(max - min + 1);
+    double rand_val = prng_next_double(prng);
+    uint64_t result = (uint64_t)(rand_val * range + min);
+
+    // Ensure we stay within bounds and match Python's & MAX_UINT64
+    return (uint32_t)(result & 0xFFFFFFFFULL);
 }
 
 double prng_next_double(prng_state_t *prng) {
     if (!prng) return 0.0;
 
     uint64_t val = prng_next_uint64(prng);
-    return (double)(val >> 11) * 0x1.0p-53;
+    return (double)val / (double)(0xFFFFFFFFFFFFFFFFULL + 1.0);
+}
+
+// RandomSampler implementation (alias method)
+bool random_sampler_init(random_sampler_t *sampler, double *probs, size_t count) {
+    if (!sampler || !probs || count == 0) return false;
+
+    // Normalize probabilities and scale
+    double total = 0.0;
+    for (size_t i = 0; i < count; i++) {
+        if (probs[i] <= 0.0) return false;
+        total += probs[i];
+    }
+    if (total <= 0.0) return false;
+
+    // Allocate memory
+    sampler->probs = safe_malloc(count * sizeof(double));
+    sampler->aliases = safe_malloc(count * sizeof(int));
+    if (!sampler->probs || !sampler->aliases) {
+        random_sampler_free(sampler);
+        return false;
+    }
+    sampler->count = count;
+
+    // Create scaled probability array P
+    double *P = safe_malloc(count * sizeof(double));
+    if (!P) {
+        random_sampler_free(sampler);
+        return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        P[i] = (probs[i] * count) / total;
+    }
+
+    // Create small and large lists
+    int *small = safe_malloc(count * sizeof(int));
+    int *large = safe_malloc(count * sizeof(int));
+    if (!small || !large) {
+        free(P);
+        free(small);
+        free(large);
+        random_sampler_free(sampler);
+        return false;
+    }
+
+    size_t small_size = 0, large_size = 0;
+
+    // Populate small and large lists (reverse order like Python)
+    for (int i = (int)count - 1; i >= 0; i--) {
+        if (P[i] < 1.0) {
+            small[small_size++] = i;
+        } else {
+            large[large_size++] = i;
+        }
+    }
+
+    // Process alias method
+    while (small_size > 0 && large_size > 0) {
+        int a = small[--small_size];  // Schwarz's l
+        int g = large[--large_size];  // Schwarz's g
+
+        sampler->probs[a] = P[a];
+        sampler->aliases[a] = g;
+        P[g] = P[g] + P[a] - 1.0;
+
+        if (P[g] < 1.0) {
+            small[small_size++] = g;
+        } else {
+            large[large_size++] = g;
+        }
+    }
+
+    // Handle remaining items
+    while (large_size > 0) {
+        sampler->probs[large[--large_size]] = 1.0;
+    }
+    while (small_size > 0) {
+        sampler->probs[small[--small_size]] = 1.0;
+    }
+
+    free(P);
+    free(small);
+    free(large);
+    return true;
+}
+
+void random_sampler_free(random_sampler_t *sampler) {
+    if (!sampler) return;
+    free(sampler->probs);
+    free(sampler->aliases);
+    sampler->probs = NULL;
+    sampler->aliases = NULL;
+    sampler->count = 0;
+}
+
+int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng) {
+    if (!sampler || !sampler->probs || !sampler->aliases || sampler->count == 0) return 0;
+
+    double r1 = prng_next_double(rng);
+    double r2 = prng_next_double(rng);
+    int i = (int)((double)sampler->count * r1);
+
+    // Ensure i is within bounds
+    if (i >= (int)sampler->count) i = (int)sampler->count - 1;
+
+    return (r2 < sampler->probs[i]) ? i : sampler->aliases[i];
 }
 
 static size_t choose_degree(size_t seq_len, prng_state_t *prng) {
-    if (seq_len == 0) return 1;
+    printf("DEBUG: choose_degree entered with seq_len=%zu\n", seq_len);
 
-    // Simplified degree selection using probability 1/i
-    double r = prng_next_double(prng);
-    double cumulative = 0.0;
-
-    for (size_t i = 1; i <= seq_len; i++) {
-        cumulative += 1.0 / i;
-        if (r <= cumulative / seq_len) {
-            return i;
-        }
+    if (seq_len == 0) {
+        printf("DEBUG: choose_degree seq_len is 0, returning 1\n");
+        return 1;
     }
-    return seq_len;
+
+    printf("DEBUG: creating degree probabilities array\n");
+    // Create degree probabilities array (1/i for i from 1 to seq_len)
+    double *degree_probs = safe_malloc(seq_len * sizeof(double));
+    if (!degree_probs) {
+        printf("DEBUG: failed to allocate degree_probs\n");
+        return 1;
+    }
+
+    printf("DEBUG: populating degree probabilities\n");
+    for (size_t i = 0; i < seq_len; i++) {
+        degree_probs[i] = 1.0 / (i + 1);
+    }
+
+    printf("DEBUG: initializing random sampler\n");
+    // Create and use RandomSampler
+    random_sampler_t sampler = {0};
+    if (!random_sampler_init(&sampler, degree_probs, seq_len)) {
+        printf("DEBUG: random_sampler_init failed\n");
+        free(degree_probs);
+        return 1;
+    }
+    printf("DEBUG: random sampler initialized successfully\n");
+
+    printf("DEBUG: calling random_sampler_next\n");
+    int degree_index = random_sampler_next(&sampler, prng);
+    printf("DEBUG: random_sampler_next returned %d\n", degree_index);
+
+    size_t degree = degree_index + 1;  // Convert 0-based index to 1-based degree
+    printf("DEBUG: calculated degree=%zu\n", degree);
+
+    random_sampler_free(&sampler);
+    free(degree_probs);
+
+    printf("DEBUG: choose_degree returning degree=%zu\n", degree);
+    return degree;
 }
 
 bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result) {
-    if (!result || seq_len == 0) return false;
+    printf("DEBUG: choose_fragments entered with seq_num=%u, seq_len=%zu, checksum=%u\n", seq_num, seq_len, checksum);
+
+    if (!result || seq_len == 0) {
+        printf("DEBUG: choose_fragments invalid parameters\n");
+        return false;
+    }
 
     part_indexes_clear(result);
 
     // The first seq_len parts are pure fragments
     if (seq_num <= seq_len) {
+        printf("DEBUG: choosing pure fragment %u\n", seq_num - 1);
         return part_indexes_add(result, seq_num - 1);
     }
 
-    // Create seed from seq_num and checksum
+    printf("DEBUG: creating mixed fragment\n");
+
+    // int_to_bytes(seq_num) + int_to_bytes(checksum)
+    // Each int_to_bytes produces 4 bytes in big-endian format
     uint8_t seed[8];
     seed[0] = (seq_num >> 24) & 0xff;
     seed[1] = (seq_num >> 16) & 0xff;
@@ -105,34 +280,54 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_
     seed[6] = (checksum >> 8) & 0xff;
     seed[7] = checksum & 0xff;
 
+    printf("DEBUG: initializing PRNG\n");
     prng_state_t rng;
-    prng_init(&rng, seed);
+    prng_init_from_bytes(&rng, seed, 8);
 
+    printf("DEBUG: calling choose_degree\n");
     size_t degree = choose_degree(seq_len, &rng);
+    printf("DEBUG: chosen degree=%zu\n", degree);
 
-    // Create list of available indexes
-    size_t *indexes = safe_malloc(seq_len * sizeof(size_t));
-    if (!indexes) return false;
+    // Create result array for shuffled indexes
+    size_t *shuffled_indexes = safe_malloc(seq_len * sizeof(size_t));
+    if (!shuffled_indexes) return false;
 
-    for (size_t i = 0; i < seq_len; i++) {
-        indexes[i] = i;
+    // Create working copy of indexes
+    size_t *remaining_indexes = safe_malloc(seq_len * sizeof(size_t));
+    if (!remaining_indexes) {
+        free(shuffled_indexes);
+        return false;
     }
 
-    // Fisher-Yates shuffle to select degree indexes
-    size_t remaining = seq_len;
-    for (size_t i = 0; i < degree && remaining > 0; i++) {
-        uint32_t idx = prng_next_int(&rng, 0, remaining - 1);
-        if (!part_indexes_add(result, indexes[idx])) {
-            free(indexes);
+    // Initialize with 0, 1, 2, ..., seq_len-1
+    for (size_t i = 0; i < seq_len; i++) {
+        remaining_indexes[i] = i;
+    }
+
+    // repeatedly remove random items
+    size_t remaining_count = seq_len;
+    for (size_t i = 0; i < seq_len && remaining_count > 0; i++) {
+        uint32_t idx = prng_next_int(&rng, 0, remaining_count - 1);
+        shuffled_indexes[i] = remaining_indexes[idx];
+
+        // Remove selected item by shifting remaining items
+        for (size_t j = idx; j < remaining_count - 1; j++) {
+            remaining_indexes[j] = remaining_indexes[j + 1];
+        }
+        remaining_count--;
+    }
+
+    // Take first 'degree' indexes
+    for (size_t i = 0; i < degree && i < seq_len; i++) {
+        if (!part_indexes_add(result, shuffled_indexes[i])) {
+            free(shuffled_indexes);
+            free(remaining_indexes);
             return false;
         }
-
-        // Remove selected index by swapping with last
-        indexes[idx] = indexes[remaining - 1];
-        remaining--;
     }
 
-    free(indexes);
+    free(shuffled_indexes);
+    free(remaining_indexes);
     return true;
 }
 

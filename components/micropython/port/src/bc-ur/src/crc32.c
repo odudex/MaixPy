@@ -29,7 +29,6 @@ uint32_t crc32_calculate(const uint8_t *data, size_t length) {
 
     crc32_init();
 
-    // Match foundation-ur-py implementation
     uint32_t crc = 0xFFFFFFFF;  // MAX_UINT32 & ~0
     for (size_t i = 0; i < length; i++) {
         crc = (crc >> 8) ^ crc32_table[(crc ^ data[i]) & 0xFF];

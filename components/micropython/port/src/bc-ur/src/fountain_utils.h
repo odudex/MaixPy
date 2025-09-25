@@ -7,11 +7,20 @@
 #include "fountain_decoder.h"
 
 /**
- * Simple PRNG for fountain coding (simplified Xoshiro256)
+ * Simple PRNG for fountain coding (Xoshiro256**)
  */
 typedef struct {
     uint64_t state[4];
 } prng_state_t;
+
+/**
+ * Random sampler for degree selection using alias method
+ */
+typedef struct {
+    double *probs;
+    int *aliases;
+    size_t count;
+} random_sampler_t;
 
 /**
  * Initialize PRNG with seed
@@ -19,6 +28,14 @@ typedef struct {
  * @param seed 8-byte seed
  */
 void prng_init(prng_state_t *prng, const uint8_t seed[8]);
+
+/**
+ * Initialize PRNG with seed using SHA256 (matching Python behavior)
+ * @param prng PRNG state
+ * @param seed Seed bytes
+ * @param seed_len Length of seed
+ */
+void prng_init_from_bytes(prng_state_t *prng, const uint8_t *seed, size_t seed_len);
 
 /**
  * Generate next random integer in range [min, max]
@@ -35,6 +52,29 @@ uint32_t prng_next_int(prng_state_t *prng, uint32_t min, uint32_t max);
  * @return Random double
  */
 double prng_next_double(prng_state_t *prng);
+
+/**
+ * Initialize random sampler with probabilities
+ * @param sampler Random sampler instance
+ * @param probs Array of probabilities
+ * @param count Number of probabilities
+ * @return true on success
+ */
+bool random_sampler_init(random_sampler_t *sampler, double *probs, size_t count);
+
+/**
+ * Free random sampler resources
+ * @param sampler Random sampler instance
+ */
+void random_sampler_free(random_sampler_t *sampler);
+
+/**
+ * Get next sample from random sampler
+ * @param sampler Random sampler instance
+ * @param rng PRNG instance
+ * @return Selected index
+ */
+int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng);
 
 /**
  * Choose fragments for a fountain encoder part
