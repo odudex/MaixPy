@@ -299,10 +299,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
 }
 
 static bool create_decoder_part_from_encoder_part(const fountain_encoder_part_t *encoder_part, decoder_part_t *decoder_part) {
-    printf("DEBUG: create_decoder_part_from_encoder_part entered\n");
-
     if (!encoder_part || !decoder_part) {
-        printf("DEBUG: create_decoder_part_from_encoder_part NULL pointer check failed\n");
         return false;
     }
 
@@ -314,20 +311,14 @@ static bool create_decoder_part_from_encoder_part(const fountain_encoder_part_t 
     decoder_part->data_len = 0;
 
     // Choose fragments based on sequence number and checksum
-    printf("DEBUG: calling choose_fragments with seq_num=%u, seq_len=%u, checksum=%u\n",
-           encoder_part->seq_num, encoder_part->seq_len, encoder_part->checksum);
     if (!choose_fragments(encoder_part->seq_num, encoder_part->seq_len, encoder_part->checksum, &decoder_part->indexes)) {
-        printf("DEBUG: choose_fragments failed\n");
         return false;
     }
-    printf("DEBUG: choose_fragments succeeded, got %u indexes\n", decoder_part->indexes.count);
 
     // Copy data
-    printf("DEBUG: copying data, data_len=%u\n", encoder_part->data_len);
     if (encoder_part->data && encoder_part->data_len > 0) {
         decoder_part->data = safe_malloc(encoder_part->data_len);
         if (!decoder_part->data) {
-            printf("DEBUG: failed to allocate decoder part data\n");
             if (decoder_part->indexes.indexes) {
                 free(decoder_part->indexes.indexes);
                 decoder_part->indexes.indexes = NULL;
@@ -336,12 +327,8 @@ static bool create_decoder_part_from_encoder_part(const fountain_encoder_part_t 
         }
         memcpy(decoder_part->data, encoder_part->data, encoder_part->data_len);
         decoder_part->data_len = encoder_part->data_len;
-        printf("DEBUG: data copied successfully\n");
-    } else {
-        printf("DEBUG: no data to copy\n");
     }
 
-    printf("DEBUG: create_decoder_part_from_encoder_part returning true\n");
     return true;
 }
 
@@ -759,97 +746,58 @@ static void process_queue_item(fountain_decoder_t *decoder) {
 }
 
 bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder_part_t *part) {
-    printf("DEBUG: fountain_decoder_receive_part entered\n");
-
     if (!decoder || !part) {
-        printf("DEBUG: fountain decoder NULL pointer check failed\n");
         return false;
     }
 
     // Don't process if already complete
     if (fountain_decoder_is_complete(decoder)) {
-        printf("DEBUG: fountain decoder already complete\n");
         return false;
     }
 
-    printf("DEBUG: initializing expected values from first part\n");
     // Initialize expected values from first part
     if (decoder->expected_part_indexes == NULL) {
-        printf("DEBUG: creating expected part indexes\n");
         decoder->expected_part_indexes = part_indexes_new();
-        if (!decoder->expected_part_indexes) {
-            printf("DEBUG: failed to create expected part indexes\n");
-            return false;
-        }
+        if (!decoder->expected_part_indexes) return false;
 
-        printf("DEBUG: adding %u expected parts\n", part->seq_len);
         for (size_t i = 0; i < part->seq_len; i++) {
-            if (!part_indexes_add(decoder->expected_part_indexes, i)) {
-                printf("DEBUG: failed to add expected part index %u\n", i);
-                return false;
-            }
+            part_indexes_add(decoder->expected_part_indexes, i);
         }
-        printf("DEBUG: expected parts added successfully\n");
 
         decoder->expected_checksum = part->checksum;
         decoder->expected_fragment_len = part->data_len;
         decoder->expected_message_len = part->message_len; // Use actual message length from part
-        printf("DEBUG: expected values set: checksum=%u, fragment_len=%u, message_len=%u\n",
-               part->checksum, part->data_len, part->message_len);
     }
 
     // Create decoder part from encoder part
-    printf("DEBUG: creating decoder part from encoder part\n");
     decoder_part_t decoder_part;
     if (!create_decoder_part_from_encoder_part(part, &decoder_part)) {
-        printf("DEBUG: failed to create decoder part from encoder part\n");
         return false;
     }
-    printf("DEBUG: decoder part created, indexes count=%u\n", decoder_part.indexes.count);
 
     // Update last part indexes
-    printf("DEBUG: updating last part indexes\n");
     if (decoder->last_part_indexes) {
         part_indexes_free(decoder->last_part_indexes);
     }
     decoder->last_part_indexes = part_indexes_new();
     if (decoder->last_part_indexes) {
         part_indexes_copy(&decoder_part.indexes, decoder->last_part_indexes);
-        printf("DEBUG: last part indexes updated\n");
-    } else {
-        printf("DEBUG: failed to create last part indexes\n");
     }
 
     // Add to queue
-    printf("DEBUG: adding decoder part to queue\n");
     if (!queue_enqueue(&decoder->queue, &decoder_part)) {
-        printf("DEBUG: failed to enqueue decoder part\n");
         decoder_part_free(&decoder_part);
         return false;
     }
-    printf("DEBUG: decoder part enqueued, queue count=%u\n", decoder->queue.count);
 
     // Process queue
-    printf("DEBUG: starting queue processing loop\n");
-    size_t loop_count = 0;
     while (!fountain_decoder_is_complete(decoder) && !queue_is_empty(&decoder->queue)) {
-        printf("DEBUG: processing queue item %u\n", loop_count);
         process_queue_item(decoder);
-        loop_count++;
-
-        // Safety check to prevent infinite loops
-        if (loop_count > 10000) {
-            printf("DEBUG: ERROR - infinite loop detected in queue processing\n");
-            break;
-        }
     }
-    printf("DEBUG: queue processing complete, processed %u items\n", loop_count);
 
     decoder->processed_parts_count++;
-    printf("DEBUG: processed parts count now: %u\n", decoder->processed_parts_count);
     decoder_part_free(&decoder_part);
 
-    printf("DEBUG: fountain_decoder_receive_part returning true\n");
     return true;
 }
 

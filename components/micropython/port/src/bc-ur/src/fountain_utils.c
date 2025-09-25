@@ -1,17 +1,14 @@
 #include "fountain_utils.h"
 #include "utils.h"
-#include "sha256/sha256.h"
+#include "sha256.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
 
-// Proper SHA256 hash function to match Python's hashlib behavior
+// Hardware accelerated SHA256 hash function
 static void compute_sha256(const uint8_t *input, size_t len, uint8_t output[32]) {
-    CRYAL_SHA256_CTX ctx;
-    sha256_init(&ctx);
-    sha256_update(&ctx, input, len);
-    sha256_final(&ctx, output);
+    sha256_hard_calculate(input, len, output);
 }
 
 // Comparison function for qsort
@@ -206,67 +203,41 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng) {
 }
 
 static size_t choose_degree(size_t seq_len, prng_state_t *prng) {
-    printf("DEBUG: choose_degree entered with seq_len=%zu\n", seq_len);
+    if (seq_len == 0) return 1;
 
-    if (seq_len == 0) {
-        printf("DEBUG: choose_degree seq_len is 0, returning 1\n");
-        return 1;
-    }
-
-    printf("DEBUG: creating degree probabilities array\n");
     // Create degree probabilities array (1/i for i from 1 to seq_len)
     double *degree_probs = safe_malloc(seq_len * sizeof(double));
-    if (!degree_probs) {
-        printf("DEBUG: failed to allocate degree_probs\n");
-        return 1;
-    }
+    if (!degree_probs) return 1;
 
-    printf("DEBUG: populating degree probabilities\n");
     for (size_t i = 0; i < seq_len; i++) {
         degree_probs[i] = 1.0 / (i + 1);
     }
 
-    printf("DEBUG: initializing random sampler\n");
     // Create and use RandomSampler
     random_sampler_t sampler = {0};
     if (!random_sampler_init(&sampler, degree_probs, seq_len)) {
-        printf("DEBUG: random_sampler_init failed\n");
         free(degree_probs);
         return 1;
     }
-    printf("DEBUG: random sampler initialized successfully\n");
 
-    printf("DEBUG: calling random_sampler_next\n");
     int degree_index = random_sampler_next(&sampler, prng);
-    printf("DEBUG: random_sampler_next returned %d\n", degree_index);
-
     size_t degree = degree_index + 1;  // Convert 0-based index to 1-based degree
-    printf("DEBUG: calculated degree=%zu\n", degree);
 
     random_sampler_free(&sampler);
     free(degree_probs);
 
-    printf("DEBUG: choose_degree returning degree=%zu\n", degree);
     return degree;
 }
 
 bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result) {
-    printf("DEBUG: choose_fragments entered with seq_num=%u, seq_len=%zu, checksum=%u\n", seq_num, seq_len, checksum);
-
-    if (!result || seq_len == 0) {
-        printf("DEBUG: choose_fragments invalid parameters\n");
-        return false;
-    }
+    if (!result || seq_len == 0) return false;
 
     part_indexes_clear(result);
 
     // The first seq_len parts are pure fragments
     if (seq_num <= seq_len) {
-        printf("DEBUG: choosing pure fragment %u\n", seq_num - 1);
         return part_indexes_add(result, seq_num - 1);
     }
-
-    printf("DEBUG: creating mixed fragment\n");
 
     // int_to_bytes(seq_num) + int_to_bytes(checksum)
     // Each int_to_bytes produces 4 bytes in big-endian format
@@ -280,13 +251,10 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_
     seed[6] = (checksum >> 8) & 0xff;
     seed[7] = checksum & 0xff;
 
-    printf("DEBUG: initializing PRNG\n");
     prng_state_t rng;
     prng_init_from_bytes(&rng, seed, 8);
 
-    printf("DEBUG: calling choose_degree\n");
     size_t degree = choose_degree(seq_len, &rng);
-    printf("DEBUG: chosen degree=%zu\n", degree);
 
     // Create result array for shuffled indexes
     size_t *shuffled_indexes = safe_malloc(seq_len * sizeof(size_t));
