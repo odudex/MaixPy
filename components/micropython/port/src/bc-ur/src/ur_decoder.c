@@ -425,11 +425,11 @@ bool ur_decoder_is_complete(ur_decoder_t *decoder) {
 }
 
 bool ur_decoder_is_success(ur_decoder_t *decoder) {
-    return decoder && decoder->is_complete_flag && decoder->result != NULL;
+    return decoder && decoder->is_complete_flag && decoder->result != NULL && decoder->last_error == UR_DECODER_OK;
 }
 
 bool ur_decoder_is_failure(ur_decoder_t *decoder) {
-    return decoder && decoder->is_complete_flag && decoder->result == NULL;
+    return decoder && decoder->is_complete_flag && (decoder->result == NULL || decoder->last_error != UR_DECODER_OK);
 }
 
 ur_result_t *ur_decoder_get_result(ur_decoder_t *decoder) {
