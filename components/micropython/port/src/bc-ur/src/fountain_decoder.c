@@ -641,7 +641,6 @@ static void process_simple_part(fountain_decoder_t *decoder, const decoder_part_
             // Verify checksum
             uint32_t checksum = crc32_calculate(message, decoder->expected_message_len);
 
-            printf("Expected checksum: %08X, Calculated checksum: %08X\n", decoder->expected_checksum, checksum);
             if (checksum == decoder->expected_checksum) {
                 // Success!
                 decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));

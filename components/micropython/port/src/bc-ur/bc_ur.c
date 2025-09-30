@@ -78,7 +78,7 @@ static void ur_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             }
         } else if (attr == MP_QSTR_cbor) {
             if (self->ur) {
-                dest[0] = mp_obj_new_bytes(ur_get_cbor(self->ur), ur_get_cbor_len(self->ur));
+                dest[0] = mp_obj_new_bytearray(ur_get_cbor_len(self->ur), ur_get_cbor(self->ur));
             } else {
                 dest[0] = mp_const_none;
             }
@@ -247,7 +247,7 @@ static mp_obj_t ur_decoder_result(mp_obj_t self_in) {
 
     // Create UR object (matches Python interface)
     mp_obj_t type_str = mp_obj_new_str(result->type, strlen(result->type));
-    mp_obj_t cbor_bytes = mp_obj_new_bytes(result->cbor_data, result->cbor_len);
+    mp_obj_t cbor_bytes = mp_obj_new_bytearray(result->cbor_len, result->cbor_data);
 
     mp_obj_t args[2] = { type_str, cbor_bytes };
     return ur_make_new(&mp_type_ur, 2, 0, args);
@@ -320,7 +320,7 @@ static void ur_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
             // Create UR object
             mp_obj_t type_str = mp_obj_new_str(result->type, strlen(result->type));
-            mp_obj_t cbor_bytes = mp_obj_new_bytes(result->cbor_data, result->cbor_len);
+            mp_obj_t cbor_bytes = mp_obj_new_bytearray(result->cbor_len, result->cbor_data);
 
             mp_obj_t args[2] = { type_str, cbor_bytes };
             dest[0] = ur_make_new(&mp_type_ur, 2, 0, args);

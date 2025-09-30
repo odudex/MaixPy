@@ -56,6 +56,40 @@ static const int16_t lookup_table[] = {
     242, -1, -1, -1
 };
 
+// Helper function to count occurrences of a character in a string
+static size_t count_char_occurrences(const char *str, char ch) {
+    if (!str) return 0;
+
+    size_t count = 0;
+    const char *ptr = str;
+    while (*ptr) {
+        if (*ptr == ch) {
+            count++;
+        }
+        ptr++;
+    }
+    return count;
+}
+
+// Helper function to calculate dynamic word count with safety margin
+static size_t calculate_word_count_with_margin(const char *encoded, size_t word_len, char separator) {
+    if (!encoded) return 0;
+
+    size_t estimated_words;
+    if (word_len == 4) {
+        // Count separators + 1 for separator-based styles
+        estimated_words = count_char_occurrences(encoded, separator) + 1;
+    } else {
+        // Minimal style: length / word_len
+        estimated_words = strlen(encoded) / word_len;
+    }
+
+    // Add 25% safety margin, minimum of 10 words
+    size_t margin = estimated_words / 4;
+    if (margin < 10) margin = 10;
+
+    return estimated_words + margin;
+}
 
 // Optimized word decoding using lookup table
 static bool decode_word_optimized(const char *word, size_t word_len, uint8_t *output) {
@@ -131,14 +165,17 @@ bool bytewords_decode(bytewords_style_t style, const char *encoded, uint8_t **de
     char **words;
     size_t num_words;
 
+    // Calculate dynamic allocation size with safety margin
+    size_t max_words = calculate_word_count_with_margin(encoded, word_len, separator);
+
     if (word_len == 4) {
         // Use separator-based splitting
-        words = safe_malloc(sizeof(char*) * BYTEWORDS_MAX_WORDS);
+        words = safe_malloc(sizeof(char*) * max_words);
         if (!words) return false;
-        num_words = str_split(encoded, separator, words, BYTEWORDS_MAX_WORDS);
+        num_words = str_split(encoded, separator, words, max_words);
     } else {
         // Use fixed-length partitioning for minimal style
-        num_words = partition_string(encoded, word_len, &words, BYTEWORDS_MAX_WORDS);
+        num_words = partition_string(encoded, word_len, &words, max_words);
     }
 
     if (num_words < 5) {
@@ -282,14 +319,17 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded, uint8_t 
     char **words;
     size_t num_words;
 
+    // Calculate dynamic allocation size with safety margin
+    size_t max_words = calculate_word_count_with_margin(encoded, word_len, separator);
+
     if (word_len == 4) {
         // Use separator-based splitting
-        words = safe_malloc(sizeof(char*) * BYTEWORDS_MAX_WORDS);
+        words = safe_malloc(sizeof(char*) * max_words);
         if (!words) return false;
-        num_words = str_split(encoded, separator, words, BYTEWORDS_MAX_WORDS);
+        num_words = str_split(encoded, separator, words, max_words);
     } else {
         // Use fixed-length partitioning for minimal style
-        num_words = partition_string(encoded, word_len, &words, BYTEWORDS_MAX_WORDS);
+        num_words = partition_string(encoded, word_len, &words, max_words);
     }
 
     if (num_words == 0) {

@@ -5,9 +5,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// Maximum number of words that can be decoded in a single bytewords string
-#define BYTEWORDS_MAX_WORDS 1000
-
 // Bytewords encoding styles
 typedef enum {
     BYTEWORDS_STYLE_STANDARD = 0,
