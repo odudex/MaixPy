@@ -391,3 +391,42 @@ bool join_fragments(uint8_t **fragments, size_t *fragment_lens, size_t fragment_
     free(temp_buffer);
     return true;
 }
+
+// Check if two part_indexes have any intersection
+bool part_indexes_have_intersection(const part_indexes_t *a, const part_indexes_t *b) {
+    if (!a || !b) return false;
+
+    for (size_t i = 0; i < a->count; i++) {
+        if (part_indexes_contains(b, a->indexes[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Calculate symmetric difference between two part_indexes sets
+bool part_indexes_symmetric_difference(const part_indexes_t *a, const part_indexes_t *b, part_indexes_t *result) {
+    if (!a || !b || !result) return false;
+
+    part_indexes_clear(result);
+
+    // Add elements that are in a but not in b
+    for (size_t i = 0; i < a->count; i++) {
+        if (!part_indexes_contains(b, a->indexes[i])) {
+            if (!part_indexes_add(result, a->indexes[i])) {
+                return false;
+            }
+        }
+    }
+
+    // Add elements that are in b but not in a
+    for (size_t i = 0; i < b->count; i++) {
+        if (!part_indexes_contains(a, b->indexes[i])) {
+            if (!part_indexes_add(result, b->indexes[i])) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}

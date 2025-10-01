@@ -329,6 +329,32 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
         fragment_len = cbor_ptr[1];
         cbor_ptr += 2;
         remaining -= 2;
+    } else if (cbor_ptr[0] == 0x59) {
+        // Byte string with uint16 length
+        if (remaining < 3) {
+            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+            free(cbor_data);
+            free(type);
+            free_string_array(components, component_count);
+            free(components);
+            return false;
+        }
+        fragment_len = (cbor_ptr[1] << 8) | cbor_ptr[2];
+        cbor_ptr += 3;
+        remaining -= 3;
+    } else if (cbor_ptr[0] == 0x5a) {
+        // Byte string with uint32 length
+        if (remaining < 5) {
+            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+            free(cbor_data);
+            free(type);
+            free_string_array(components, component_count);
+            free(components);
+            return false;
+        }
+        fragment_len = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) | (cbor_ptr[3] << 8) | cbor_ptr[4];
+        cbor_ptr += 5;
+        remaining -= 5;
     } else {
         decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
         free(cbor_data);

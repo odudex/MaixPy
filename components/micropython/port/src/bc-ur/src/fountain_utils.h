@@ -120,6 +120,23 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b);
 bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
 
 /**
+ * Check if two part_indexes have any intersection
+ * @param a First set
+ * @param b Second set
+ * @return true if they share any indexes
+ */
+bool part_indexes_have_intersection(const part_indexes_t *a, const part_indexes_t *b);
+
+/**
+ * Calculate symmetric difference between two part_indexes sets
+ * @param a First set
+ * @param b Second set
+ * @param result Output set (A ⊕ B)
+ * @return true on success
+ */
+bool part_indexes_symmetric_difference(const part_indexes_t *a, const part_indexes_t *b, part_indexes_t *result);
+
+/**
  * Join fragments into a single message, taking only message_len bytes
  * @param fragments Array of fragment pointers
  * @param fragment_lens Array of fragment lengths

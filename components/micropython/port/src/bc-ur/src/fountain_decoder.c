@@ -147,6 +147,18 @@ void part_indexes_free(part_indexes_t *indexes) {
     }
 }
 
+// Helper to clear part_indexes without freeing the struct itself
+static void part_indexes_clear_internal(part_indexes_t *indexes) {
+    if (indexes) {
+        if (indexes->indexes) {
+            free(indexes->indexes);
+            indexes->indexes = NULL;
+        }
+        indexes->count = 0;
+        indexes->capacity = 0;
+    }
+}
+
 bool part_indexes_add(part_indexes_t *indexes, size_t index) {
     if (!indexes) return false;
 
@@ -227,6 +239,10 @@ fountain_decoder_t *fountain_decoder_new(void) {
         free(decoder);
         return NULL;
     }
+
+    // Initialize duplicate detection
+    decoder->last_fragment_seq_num = 0;
+    decoder->has_received_fragment = false;
 
     return decoder;
 }
@@ -529,13 +545,8 @@ static void reduce_mixed_by(fountain_decoder_t *decoder, const decoder_part_t *p
     // Clear current mixed parts using original count
     for (size_t i = 0; i < original_count; i++) {
         decoder_part_free(&decoder->mixed_parts.values[i]);
-        // Clear key_sets properly
-        if (decoder->mixed_parts.key_sets[i].indexes) {
-            free(decoder->mixed_parts.key_sets[i].indexes);
-            decoder->mixed_parts.key_sets[i].indexes = NULL;
-        }
-        decoder->mixed_parts.key_sets[i].count = 0;
-        decoder->mixed_parts.key_sets[i].capacity = 0;
+        // Clear key_sets properly using the helper function
+        part_indexes_clear_internal(&decoder->mixed_parts.key_sets[i]);
     }
     decoder->mixed_parts.count = 0; // Reset count after freeing
     
@@ -552,6 +563,180 @@ static void reduce_mixed_by(fountain_decoder_t *decoder, const decoder_part_t *p
     }
     
     free(reduced_parts);
+}
+
+// Function to create symmetric difference between two mixed parts
+static bool create_symmetric_diff(const decoder_part_t *a, const decoder_part_t *b, decoder_part_t *result) {
+    if (!a || !b || !result || a->data_len != b->data_len) return false;
+
+    // Initialize result
+    result->indexes.indexes = NULL;
+    result->indexes.count = 0;
+    result->indexes.capacity = 0;
+    result->data = NULL;
+    result->data_len = 0;
+
+    // Calculate symmetric difference of indexes (A ⊕ B = (A ∪ B) - (A ∩ B))
+    if (!part_indexes_symmetric_difference(&a->indexes, &b->indexes, &result->indexes)) {
+        return false;
+    }
+
+    // If no symmetric difference (parts are identical), skip
+    if (result->indexes.count == 0) {
+        // Free the indexes array if allocated (even though count is 0)
+        if (result->indexes.indexes) {
+            free(result->indexes.indexes);
+            result->indexes.indexes = NULL;
+        }
+        return false;
+    }
+
+    // XOR the data
+    result->data = safe_malloc(a->data_len);
+    if (!result->data) {
+        if (result->indexes.indexes) {
+            free(result->indexes.indexes);
+            result->indexes.indexes = NULL;
+        }
+        result->indexes.count = 0;
+        result->indexes.capacity = 0;
+        return false;
+    }
+
+    result->data_len = a->data_len;
+    for (size_t i = 0; i < a->data_len; i++) {
+        result->data[i] = a->data[i] ^ b->data[i];
+    }
+
+    return true;
+}
+
+// Forward declaration
+static void gaussian_reduce_with_new_part(fountain_decoder_t *decoder, const decoder_part_t *pivot);
+
+// Gaussian elimination style reduction for mixed parts
+static void reduce_mixed_against_mixed(fountain_decoder_t *decoder) {
+    if (!decoder || decoder->mixed_parts.count < 2) return;
+
+    bool made_progress = true;
+    int max_iterations = 10; // Allow more iterations for thorough reduction
+    int iteration = 0;
+
+    while (made_progress && iteration < max_iterations) {
+        made_progress = false;
+        iteration++;
+
+        // OPTIMIZATION: Progressive search - try nearby pairs first, expand if needed
+        // This provides massive speedup on embedded devices while maintaining correctness
+        size_t max_distance;
+        if (iteration <= 2) {
+            max_distance = 5; // First 2 iterations: check nearby pairs (fast)
+        } else if (iteration <= 5) {
+            max_distance = 15; // Middle iterations: expand search
+        } else {
+            max_distance = decoder->mixed_parts.count; // Later iterations: full search if still needed
+        }
+        
+        // Try all pairs of mixed parts (within max_distance)
+        for (size_t i = 0; i < decoder->mixed_parts.count && !made_progress; i++) {
+            for (size_t offset = 1; offset <= max_distance && (i + offset) < decoder->mixed_parts.count; offset++) {
+                size_t j = i + offset;
+                
+                // Check if parts have any shared indexes
+                if (part_indexes_have_intersection(&decoder->mixed_parts.key_sets[i], &decoder->mixed_parts.key_sets[j])) {
+
+                    decoder_part_t new_part = {0};
+
+                    // Create symmetric difference part (i XOR j)
+                    if (create_symmetric_diff(&decoder->mixed_parts.values[i], &decoder->mixed_parts.values[j], &new_part)) {
+
+                        // Check if this new part is useful (not a duplicate)
+                        bool is_duplicate = false;
+                        for (size_t k = 0; k < decoder->mixed_parts.count; k++) {
+                            if (part_indexes_equal(&new_part.indexes, &decoder->mixed_parts.key_sets[k])) {
+                                is_duplicate = true;
+                                break;
+                            }
+                        }
+
+                        if (!is_duplicate && new_part.indexes.count > 0) {
+                            made_progress = true;
+
+                            if (is_simple_part(&new_part)) {
+                                // It's a simple part - add to queue for immediate processing
+                                queue_enqueue(&decoder->queue, &new_part);
+                                decoder_part_free(&new_part);
+                                // OPTIMIZATION: Exit immediately when simple part found - huge speedup!
+                                return;
+                            } else {
+                                // It's a mixed part - add it and use it for Gaussian elimination
+                                if (add_mixed_part(decoder, &new_part)) {
+                                    // Now use this new part to reduce ALL other mixed parts (Gaussian style)
+                                    gaussian_reduce_with_new_part(decoder, &new_part);
+                                }
+                                decoder_part_free(&new_part);
+                            }
+                            break;
+                        } else {
+                            decoder_part_free(&new_part);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Gaussian elimination: use a new part to reduce all existing mixed parts
+static void gaussian_reduce_with_new_part(fountain_decoder_t *decoder, const decoder_part_t *pivot) {
+    if (!decoder || !pivot || is_simple_part(pivot)) return;
+
+    // Create a list to track which parts to update
+    size_t mixed_count = decoder->mixed_parts.count;
+    
+    // Use the pivot to reduce all other mixed parts that share indexes with it
+    for (size_t i = 0; i < mixed_count; i++) {
+        // Skip if we're beyond current count (parts may have been removed)
+        if (i >= decoder->mixed_parts.count) break;
+        
+        // Skip if this is the pivot itself
+        if (part_indexes_equal(&decoder->mixed_parts.key_sets[i], &pivot->indexes)) {
+            continue;
+        }
+
+        // Check if this part can be reduced by the pivot
+        if (part_indexes_is_strict_subset(&pivot->indexes, &decoder->mixed_parts.key_sets[i])) {
+            decoder_part_t reduced;
+            reduced.indexes.indexes = NULL;
+            reduced.indexes.count = 0;
+            reduced.indexes.capacity = 0;
+            reduced.data = NULL;
+            reduced.data_len = 0;
+
+            if (reduce_part_by_part(&decoder->mixed_parts.values[i], pivot, &reduced)) {
+                // Free the old part data
+                decoder_part_free(&decoder->mixed_parts.values[i]);
+                part_indexes_clear_internal(&decoder->mixed_parts.key_sets[i]);
+
+                // Copy reduced part to the position
+                decoder->mixed_parts.values[i] = reduced;
+                
+                // Copy the indexes
+                if (!part_indexes_copy(&reduced.indexes, &decoder->mixed_parts.key_sets[i])) {
+                    // If copy fails, at least zero it out
+                    decoder_part_free(&reduced);
+                    continue;
+                }
+                
+                decoder->mixed_parts.value_lens[i] = reduced.data_len;
+                
+                // If it became simple, add to queue
+                if (is_simple_part(&reduced)) {
+                    queue_enqueue(&decoder->queue, &reduced);
+                }
+            }
+        }
+    }
 }
 
 static void process_simple_part(fountain_decoder_t *decoder, const decoder_part_t *part) {
@@ -738,8 +923,12 @@ static void process_queue_item(fountain_decoder_t *decoder) {
         process_simple_part(decoder, &part);
         // After processing a simple part, reduce all mixed parts by it
         reduce_mixed_by(decoder, &part);
+        // Try mixed-to-mixed reductions to discover new simple parts
+        reduce_mixed_against_mixed(decoder);
     } else {
         process_mixed_part(decoder, &part);
+        // Try mixed-to-mixed reductions to discover new simple parts
+        reduce_mixed_against_mixed(decoder);
     }
 
     decoder_part_free(&part);
@@ -753,6 +942,13 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder
     // Don't process if already complete
     if (fountain_decoder_is_complete(decoder)) {
         return false;
+    }
+
+    // Check for duplicate fragment by sequence number
+    if (decoder->has_received_fragment && part->seq_num == decoder->last_fragment_seq_num) {
+        // This is a duplicate fragment (same seq_num as last), skip processing
+        // Return true because duplicate is not an error, just a no-op
+        return true;
     }
 
     // Initialize expected values from first part
@@ -796,6 +992,11 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder
     }
 
     decoder->processed_parts_count++;
+    
+    // Update last fragment sequence number for duplicate detection
+    decoder->last_fragment_seq_num = part->seq_num;
+    decoder->has_received_fragment = true;
+    
     decoder_part_free(&decoder_part);
 
     return true;

@@ -91,6 +91,10 @@ typedef struct fountain_decoder {
 
     // Processing queue
     part_queue_t queue;
+
+    // Duplicate detection: store last fragment sequence number
+    uint32_t last_fragment_seq_num;
+    bool has_received_fragment;
 } fountain_decoder_t;
 
 // Function declarations
