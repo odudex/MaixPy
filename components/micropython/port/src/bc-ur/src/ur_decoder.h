@@ -1,45 +1,39 @@
 #ifndef UR_DECODER_H
 #define UR_DECODER_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
-// Error codes
 typedef enum {
-    UR_DECODER_OK = 0,
-    UR_DECODER_ERROR_INVALID_SCHEME,
-    UR_DECODER_ERROR_INVALID_TYPE,
-    UR_DECODER_ERROR_INVALID_PATH_LENGTH,
-    UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT,
-    UR_DECODER_ERROR_INVALID_FRAGMENT,
-    UR_DECODER_ERROR_INVALID_PART,
-    UR_DECODER_ERROR_INVALID_CHECKSUM,
-    UR_DECODER_ERROR_MEMORY,
-    UR_DECODER_ERROR_NULL_POINTER
+  UR_DECODER_OK = 0,
+  UR_DECODER_ERROR_INVALID_SCHEME,
+  UR_DECODER_ERROR_INVALID_TYPE,
+  UR_DECODER_ERROR_INVALID_PATH_LENGTH,
+  UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT,
+  UR_DECODER_ERROR_INVALID_FRAGMENT,
+  UR_DECODER_ERROR_INVALID_PART,
+  UR_DECODER_ERROR_INVALID_CHECKSUM,
+  UR_DECODER_ERROR_MEMORY,
+  UR_DECODER_ERROR_NULL_POINTER
 } ur_decoder_error_t;
 
-// Forward declarations
 typedef struct ur_decoder ur_decoder_t;
 typedef struct fountain_decoder fountain_decoder_t;
 
-// UR result structure
 typedef struct {
-    char *type;
-    uint8_t *cbor_data;
-    size_t cbor_len;
+  char *type;
+  uint8_t *cbor_data;
+  size_t cbor_len;
 } ur_result_t;
 
-// URDecoder structure
 typedef struct ur_decoder {
-    fountain_decoder_t *fountain_decoder;
-    char *expected_type;
-    ur_result_t *result;
-    bool is_complete_flag;
-    ur_decoder_error_t last_error;
+  fountain_decoder_t *fountain_decoder;
+  char *expected_type;
+  ur_result_t *result;
+  bool is_complete_flag;
+  ur_decoder_error_t last_error;
 } ur_decoder_t;
-
-// Function declarations
 
 /**
  * Create a new URDecoder instance
@@ -123,9 +117,9 @@ ur_decoder_error_t ur_decoder_get_last_error(ur_decoder_t *decoder);
  * @param result Output result structure
  * @return Error code
  */
-ur_decoder_error_t ur_decoder_decode_single(const char *ur_string, ur_result_t **result);
+ur_decoder_error_t ur_decoder_decode_single(const char *ur_string,
+                                            ur_result_t **result);
 
-// Helper functions
 void ur_result_free(ur_result_t *result);
 
 #endif // UR_DECODER_H

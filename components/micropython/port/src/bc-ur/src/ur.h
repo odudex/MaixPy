@@ -1,15 +1,14 @@
 #ifndef UR_H
 #define UR_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
-// UR structure - represents a decoded UR
 typedef struct {
-    char *type;
-    uint8_t *cbor;
-    size_t cbor_len;
+  char *type;
+  uint8_t *cbor;
+  size_t cbor_len;
 } ur_t;
 
 /**

@@ -1,9 +1,9 @@
 #ifndef UR_UTILS_H
 #define UR_UTILS_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // String manipulation utilities
 
@@ -29,7 +29,8 @@ void str_to_lower(char *str);
  * @param max_parts Maximum number of parts
  * @return Number of parts found
  */
-size_t str_split(const char *str, char delimiter, char **parts, size_t max_parts);
+size_t str_split(const char *str, char delimiter, char **parts,
+                 size_t max_parts);
 
 /**
  * Check if string is a valid UR type
@@ -46,7 +47,8 @@ bool is_ur_type(const char *type);
  * @param component_count Output component count
  * @return true on success, false on error
  */
-bool parse_ur_string(const char *ur_str, char **type, char ***components, size_t *component_count);
+bool parse_ur_string(const char *ur_str, char **type, char ***components,
+                     size_t *component_count);
 
 /**
  * Parse sequence component (e.g., "1-5" -> seq_num=1, seq_len=5)
@@ -55,7 +57,8 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components, size_t
  * @param seq_len Output sequence length
  * @return true on success, false on error
  */
-bool parse_sequence_component(const char *seq_str, uint32_t *seq_num, size_t *seq_len);
+bool parse_sequence_component(const char *seq_str, uint32_t *seq_num,
+                              size_t *seq_len);
 
 /**
  * Free string array

@@ -1,524 +1,518 @@
 #include "ur_decoder.h"
-#include "fountain_decoder.h"
 #include "bytewords.h"
+#include "fountain_decoder.h"
 #include "utils.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
-// Helper function to create fountain encoder part from CBOR data
-static fountain_encoder_part_t *create_fountain_part_from_cbor(const uint8_t *cbor_data, size_t cbor_len,
-                                                               uint32_t seq_num, size_t seq_len) {
-    if (!cbor_data || cbor_len == 0) return NULL;
+static fountain_encoder_part_t *
+create_fountain_part_from_cbor(const uint8_t *cbor_data, size_t cbor_len,
+                               uint32_t seq_num, size_t seq_len) {
+  if (!cbor_data || cbor_len == 0)
+    return NULL;
 
-    fountain_encoder_part_t *part = safe_malloc(sizeof(fountain_encoder_part_t));
-    if (!part) return NULL;
+  fountain_encoder_part_t *part = safe_malloc(sizeof(fountain_encoder_part_t));
+  if (!part)
+    return NULL;
 
-    part->seq_num = seq_num;
-    part->seq_len = seq_len;
-    part->message_len = 0;
-    part->checksum = 0;
-    part->data_len = cbor_len;
+  part->seq_num = seq_num;
+  part->seq_len = seq_len;
+  part->message_len = 0;
+  part->checksum = 0;
+  part->data_len = cbor_len;
 
-    part->data = safe_malloc(cbor_len);
-    if (!part->data) {
-        free(part);
-        return NULL;
-    }
+  part->data = safe_malloc(cbor_len);
+  if (!part->data) {
+    free(part);
+    return NULL;
+  }
 
-    memcpy(part->data, cbor_data, cbor_len);
-    return part;
+  memcpy(part->data, cbor_data, cbor_len);
+  return part;
 }
 
 static void free_fountain_part(fountain_encoder_part_t *part) {
-    if (part) {
-        if (part->data) {
-            free(part->data);
-        }
-        free(part);
+  if (part) {
+    if (part->data) {
+      free(part->data);
     }
+    free(part);
+  }
 }
 
 ur_decoder_t *ur_decoder_new(void) {
-    ur_decoder_t *decoder = safe_malloc(sizeof(ur_decoder_t));
-    if (!decoder) return NULL;
+  ur_decoder_t *decoder = safe_malloc(sizeof(ur_decoder_t));
+  if (!decoder)
+    return NULL;
 
-    decoder->fountain_decoder = fountain_decoder_new();
-    if (!decoder->fountain_decoder) {
-        free(decoder);
-        return NULL;
-    }
+  decoder->fountain_decoder = fountain_decoder_new();
+  if (!decoder->fountain_decoder) {
+    free(decoder);
+    return NULL;
+  }
 
-    decoder->expected_type = NULL;
-    decoder->result = NULL;
-    decoder->is_complete_flag = false;
-    decoder->last_error = UR_DECODER_OK;
+  decoder->expected_type = NULL;
+  decoder->result = NULL;
+  decoder->is_complete_flag = false;
+  decoder->last_error = UR_DECODER_OK;
 
-    return decoder;
+  return decoder;
 }
 
 void ur_decoder_free(ur_decoder_t *decoder) {
-    if (!decoder) return;
+  if (!decoder)
+    return;
 
-    if (decoder->fountain_decoder) {
-        fountain_decoder_free(decoder->fountain_decoder);
-    }
+  if (decoder->fountain_decoder) {
+    fountain_decoder_free(decoder->fountain_decoder);
+  }
 
-    if (decoder->expected_type) {
-        free(decoder->expected_type);
-    }
+  if (decoder->expected_type) {
+    free(decoder->expected_type);
+  }
 
-    if (decoder->result) {
-        ur_result_free(decoder->result);
-    }
+  if (decoder->result) {
+    ur_result_free(decoder->result);
+  }
 
-    free(decoder);
+  free(decoder);
 }
 
 static bool validate_part_type(ur_decoder_t *decoder, const char *type) {
-    if (!decoder || !type) return false;
+  if (!decoder || !type)
+    return false;
 
+  if (!decoder->expected_type) {
+    if (!is_ur_type(type)) {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_TYPE;
+      return false;
+    }
+    decoder->expected_type = safe_strdup(type);
     if (!decoder->expected_type) {
-        if (!is_ur_type(type)) {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_TYPE;
-            return false;
-        }
-        decoder->expected_type = safe_strdup(type);
-        if (!decoder->expected_type) {
-            decoder->last_error = UR_DECODER_ERROR_MEMORY;
-            return false;
-        }
-        return true;
+      decoder->last_error = UR_DECODER_ERROR_MEMORY;
+      return false;
     }
-
-    if (strcmp(decoder->expected_type, type) != 0) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_TYPE;
-        return false;
-    }
-
     return true;
+  }
+
+  if (strcmp(decoder->expected_type, type) != 0) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_TYPE;
+    return false;
+  }
+
+  return true;
 }
 
 static ur_result_t *decode_single_part(const char *type, const char *body) {
-    if (!type || !body) return NULL;
+  if (!type || !body)
+    return NULL;
 
-    // Decode bytewords (raw, no CRC validation)
-    uint8_t *cbor_data;
-    size_t cbor_len;
-    if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, body, &cbor_data, &cbor_len)) {
-        return NULL;
-    }
+  uint8_t *cbor_data;
+  size_t cbor_len;
+  if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, body, &cbor_data,
+                            &cbor_len)) {
+    return NULL;
+  }
 
-    // Create result
-    ur_result_t *result = safe_malloc(sizeof(ur_result_t));
-    if (!result) {
-        free(cbor_data);
-        return NULL;
-    }
+  ur_result_t *result = safe_malloc(sizeof(ur_result_t));
+  if (!result) {
+    free(cbor_data);
+    return NULL;
+  }
 
-    result->type = safe_strdup(type);
-    result->cbor_data = cbor_data;
-    result->cbor_len = cbor_len;
+  result->type = safe_strdup(type);
+  result->cbor_data = cbor_data;
+  result->cbor_len = cbor_len;
 
-    if (!result->type) {
-        free(cbor_data);
-        free(result);
-        return NULL;
-    }
+  if (!result->type) {
+    free(cbor_data);
+    free(result);
+    return NULL;
+  }
 
-    return result;
+  return result;
 }
 
 bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
-    if (!decoder || !part_str) {
-        if (decoder) decoder->last_error = UR_DECODER_ERROR_NULL_POINTER;
-        return false;
-    }
+  if (!decoder || !part_str) {
+    if (decoder)
+      decoder->last_error = UR_DECODER_ERROR_NULL_POINTER;
+    return false;
+  }
 
-    // Don't process if already complete
-    if (decoder->is_complete_flag) {
-        return false;
-    }
+  if (decoder->is_complete_flag) {
+    return false;
+  }
 
-    decoder->last_error = UR_DECODER_OK;
+  decoder->last_error = UR_DECODER_OK;
 
-    // Parse UR string
-    char *type;
-    char **components;
-    size_t component_count;
+  char *type;
+  char **components;
+  size_t component_count;
 
-    if (!parse_ur_string(part_str, &type, &components, &component_count)) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_SCHEME;
-        return false;
-    }
+  if (!parse_ur_string(part_str, &type, &components, &component_count)) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_SCHEME;
+    return false;
+  }
 
-    // Validate part type
-    if (!validate_part_type(decoder, type)) {
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
+  if (!validate_part_type(decoder, type)) {
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
 
-    // Handle single-part UR
-    if (component_count == 1) {
-        decoder->result = decode_single_part(type, components[0]);
-        if (decoder->result) {
-            decoder->is_complete_flag = true;
-        } else {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        }
-
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return decoder->result != NULL;
-    }
-
-    // Handle multi-part UR
-    if (component_count != 2) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_PATH_LENGTH;
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Parse sequence component
-    uint32_t seq_num;
-    size_t seq_len;
-    if (!parse_sequence_component(components[0], &seq_num, &seq_len)) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Decode fragment (raw, no CRC validation)
-    uint8_t *cbor_data;
-    size_t cbor_len;
-    if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, components[1], &cbor_data, &cbor_len)) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Parse CBOR to extract fountain part data
-    // CBOR format: [seq_num, seq_len, message_len, checksum, fragment_data]
-    if (cbor_len < 5) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Simple CBOR parsing for the expected format
-    // This is a simplified parser - assumes well-formed CBOR array
-    const uint8_t *cbor_ptr = cbor_data;
-    size_t remaining = cbor_len;
-
-    // Check for CBOR array marker (0x85 = array of 5 elements)
-    if (remaining < 1 || cbor_ptr[0] != 0x85) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-    cbor_ptr++;
-    remaining--;
-
-    // Parse and extract values: seq_num, seq_len, message_len, checksum
-    uint32_t cbor_seq_num = 0, cbor_seq_len = 0, cbor_message_len = 0, cbor_checksum = 0;
-    uint32_t *values[] = {&cbor_seq_num, &cbor_seq_len, &cbor_message_len, &cbor_checksum};
-
-    for (int i = 0; i < 4; i++) {
-        if (remaining < 1) {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-            free(cbor_data);
-            free(type);
-            free_string_array(components, component_count);
-            free(components);
-            return false;
-        }
-
-        // Parse the integer value (simplified - assumes values < 2^32)
-        if (cbor_ptr[0] < 24) {
-            *values[i] = cbor_ptr[0];
-            cbor_ptr++;
-            remaining--;
-        } else if (cbor_ptr[0] == 24) {
-            if (remaining < 2) {
-                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-                free(cbor_data);
-                free(type);
-                free_string_array(components, component_count);
-                free(components);
-                return false;
-            }
-            *values[i] = cbor_ptr[1];
-            cbor_ptr += 2;
-            remaining -= 2;
-        } else if (cbor_ptr[0] == 25) {
-            if (remaining < 3) {
-                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-                free(cbor_data);
-                free(type);
-                free_string_array(components, component_count);
-                free(components);
-                return false;
-            }
-            *values[i] = (cbor_ptr[1] << 8) | cbor_ptr[2];
-            cbor_ptr += 3;
-            remaining -= 3;
-        } else if (cbor_ptr[0] == 26) {
-            if (remaining < 5) {
-                decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-                free(cbor_data);
-                free(type);
-                free_string_array(components, component_count);
-                free(components);
-                return false;
-            }
-            *values[i] = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) | (cbor_ptr[3] << 8) | cbor_ptr[4];
-            cbor_ptr += 5;
-            remaining -= 5;
-        } else {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-            free(cbor_data);
-            free(type);
-            free_string_array(components, component_count);
-            free(components);
-            return false;
-        }
-    }
-
-    // Now we should be at the fragment_data (byte string)
-    if (remaining < 2) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Parse byte string length
-    size_t fragment_len = 0;
-    if (cbor_ptr[0] >= 0x40 && cbor_ptr[0] <= 0x57) {
-        // Short byte string (length 0-23)
-        fragment_len = cbor_ptr[0] - 0x40;
-        cbor_ptr++;
-        remaining--;
-    } else if (cbor_ptr[0] == 0x58) {
-        // Byte string with uint8 length
-        if (remaining < 2) {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-            free(cbor_data);
-            free(type);
-            free_string_array(components, component_count);
-            free(components);
-            return false;
-        }
-        fragment_len = cbor_ptr[1];
-        cbor_ptr += 2;
-        remaining -= 2;
-    } else if (cbor_ptr[0] == 0x59) {
-        // Byte string with uint16 length
-        if (remaining < 3) {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-            free(cbor_data);
-            free(type);
-            free_string_array(components, component_count);
-            free(components);
-            return false;
-        }
-        fragment_len = (cbor_ptr[1] << 8) | cbor_ptr[2];
-        cbor_ptr += 3;
-        remaining -= 3;
-    } else if (cbor_ptr[0] == 0x5a) {
-        // Byte string with uint32 length
-        if (remaining < 5) {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-            free(cbor_data);
-            free(type);
-            free_string_array(components, component_count);
-            free(components);
-            return false;
-        }
-        fragment_len = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) | (cbor_ptr[3] << 8) | cbor_ptr[4];
-        cbor_ptr += 5;
-        remaining -= 5;
+  if (component_count == 1) {
+    decoder->result = decode_single_part(type, components[0]);
+    if (decoder->result) {
+      decoder->is_complete_flag = true;
     } else {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Check if we have enough data for the fragment
-    if (remaining < fragment_len) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Extract the actual fragment data
-    uint8_t *fragment_data = safe_malloc(fragment_len);
-    if (!fragment_data) {
-        decoder->last_error = UR_DECODER_ERROR_MEMORY;
-        free(cbor_data);
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-    memcpy(fragment_data, cbor_ptr, fragment_len);
-
-    // Create fountain part with extracted fragment data and checksum
-    fountain_encoder_part_t *part = create_fountain_part_from_cbor(fragment_data, fragment_len, seq_num, seq_len);
-    if (part) {
-        part->message_len = cbor_message_len;
-        part->checksum = cbor_checksum;
-    }
-    free(fragment_data);
-    free(cbor_data);
-
-    if (!part) {
-        decoder->last_error = UR_DECODER_ERROR_MEMORY;
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Process part in fountain decoder
-    bool success = fountain_decoder_receive_part(decoder->fountain_decoder, part);
-    free_fountain_part(part);
-
-    if (!success) {
-        decoder->last_error = UR_DECODER_ERROR_INVALID_PART;
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return false;
-    }
-
-    // Check if fountain decoder is complete
-    if (fountain_decoder_is_complete(decoder->fountain_decoder)) {
-        if (fountain_decoder_is_success(decoder->fountain_decoder)) {
-            // Create result from fountain decoder
-            decoder->result = safe_malloc(sizeof(ur_result_t));
-            if (decoder->result) {
-                decoder->result->type = safe_strdup(type);
-                size_t result_len = fountain_decoder_result_message_len(decoder->fountain_decoder);
-                uint8_t *result_data = fountain_decoder_result_message(decoder->fountain_decoder);
-
-                if (result_data && result_len > 0) {
-                    decoder->result->cbor_data = safe_malloc(result_len);
-                    if (decoder->result->cbor_data) {
-                        memcpy(decoder->result->cbor_data, result_data, result_len);
-                        decoder->result->cbor_len = result_len;
-                        decoder->is_complete_flag = true;
-                    }
-                }
-            }
-        } else {
-            decoder->last_error = UR_DECODER_ERROR_INVALID_CHECKSUM;
-            decoder->is_complete_flag = true;  // Complete with error
-        }
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
     }
 
     free(type);
     free_string_array(components, component_count);
     free(components);
-    return success;
+    return decoder->result != NULL;
+  }
+
+  if (component_count != 2) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_PATH_LENGTH;
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  uint32_t seq_num;
+  size_t seq_len;
+  if (!parse_sequence_component(components[0], &seq_num, &seq_len)) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  uint8_t *cbor_data;
+  size_t cbor_len;
+  if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, components[1], &cbor_data,
+                            &cbor_len)) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  if (cbor_len < 5) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  const uint8_t *cbor_ptr = cbor_data;
+  size_t remaining = cbor_len;
+
+  if (remaining < 1 || cbor_ptr[0] != 0x85) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+  cbor_ptr++;
+  remaining--;
+
+  uint32_t cbor_seq_num = 0, cbor_seq_len = 0, cbor_message_len = 0,
+           cbor_checksum = 0;
+  uint32_t *values[] = {&cbor_seq_num, &cbor_seq_len, &cbor_message_len,
+                        &cbor_checksum};
+
+  for (int i = 0; i < 4; i++) {
+    if (remaining < 1) {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+      free(cbor_data);
+      free(type);
+      free_string_array(components, component_count);
+      free(components);
+      return false;
+    }
+
+    if (cbor_ptr[0] < 24) {
+      *values[i] = cbor_ptr[0];
+      cbor_ptr++;
+      remaining--;
+    } else if (cbor_ptr[0] == 24) {
+      if (remaining < 2) {
+        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+        free(cbor_data);
+        free(type);
+        free_string_array(components, component_count);
+        free(components);
+        return false;
+      }
+      *values[i] = cbor_ptr[1];
+      cbor_ptr += 2;
+      remaining -= 2;
+    } else if (cbor_ptr[0] == 25) {
+      if (remaining < 3) {
+        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+        free(cbor_data);
+        free(type);
+        free_string_array(components, component_count);
+        free(components);
+        return false;
+      }
+      *values[i] = (cbor_ptr[1] << 8) | cbor_ptr[2];
+      cbor_ptr += 3;
+      remaining -= 3;
+    } else if (cbor_ptr[0] == 26) {
+      if (remaining < 5) {
+        decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+        free(cbor_data);
+        free(type);
+        free_string_array(components, component_count);
+        free(components);
+        return false;
+      }
+      *values[i] = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) |
+                   (cbor_ptr[3] << 8) | cbor_ptr[4];
+      cbor_ptr += 5;
+      remaining -= 5;
+    } else {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+      free(cbor_data);
+      free(type);
+      free_string_array(components, component_count);
+      free(components);
+      return false;
+    }
+  }
+
+  if (remaining < 2) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  size_t fragment_len = 0;
+  if (cbor_ptr[0] >= 0x40 && cbor_ptr[0] <= 0x57) {
+    fragment_len = cbor_ptr[0] - 0x40;
+    cbor_ptr++;
+    remaining--;
+  } else if (cbor_ptr[0] == 0x58) {
+    if (remaining < 2) {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+      free(cbor_data);
+      free(type);
+      free_string_array(components, component_count);
+      free(components);
+      return false;
+    }
+    fragment_len = cbor_ptr[1];
+    cbor_ptr += 2;
+    remaining -= 2;
+  } else if (cbor_ptr[0] == 0x59) {
+    if (remaining < 3) {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+      free(cbor_data);
+      free(type);
+      free_string_array(components, component_count);
+      free(components);
+      return false;
+    }
+    fragment_len = (cbor_ptr[1] << 8) | cbor_ptr[2];
+    cbor_ptr += 3;
+    remaining -= 3;
+  } else if (cbor_ptr[0] == 0x5a) {
+    if (remaining < 5) {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+      free(cbor_data);
+      free(type);
+      free_string_array(components, component_count);
+      free(components);
+      return false;
+    }
+    fragment_len = (cbor_ptr[1] << 24) | (cbor_ptr[2] << 16) |
+                   (cbor_ptr[3] << 8) | cbor_ptr[4];
+    cbor_ptr += 5;
+    remaining -= 5;
+  } else {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  if (remaining < fragment_len) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  uint8_t *fragment_data = safe_malloc(fragment_len);
+  if (!fragment_data) {
+    decoder->last_error = UR_DECODER_ERROR_MEMORY;
+    free(cbor_data);
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+  memcpy(fragment_data, cbor_ptr, fragment_len);
+
+  fountain_encoder_part_t *part = create_fountain_part_from_cbor(
+      fragment_data, fragment_len, seq_num, seq_len);
+  if (part) {
+    part->message_len = cbor_message_len;
+    part->checksum = cbor_checksum;
+  }
+  free(fragment_data);
+  free(cbor_data);
+
+  if (!part) {
+    decoder->last_error = UR_DECODER_ERROR_MEMORY;
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  bool success = fountain_decoder_receive_part(decoder->fountain_decoder, part);
+  free_fountain_part(part);
+
+  if (!success) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_PART;
+    free(type);
+    free_string_array(components, component_count);
+    free(components);
+    return false;
+  }
+
+  if (fountain_decoder_is_complete(decoder->fountain_decoder)) {
+    if (fountain_decoder_is_success(decoder->fountain_decoder)) {
+      decoder->result = safe_malloc(sizeof(ur_result_t));
+      if (decoder->result) {
+        decoder->result->type = safe_strdup(type);
+        size_t result_len =
+            fountain_decoder_result_message_len(decoder->fountain_decoder);
+        uint8_t *result_data =
+            fountain_decoder_result_message(decoder->fountain_decoder);
+
+        if (result_data && result_len > 0) {
+          decoder->result->cbor_data = safe_malloc(result_len);
+          if (decoder->result->cbor_data) {
+            memcpy(decoder->result->cbor_data, result_data, result_len);
+            decoder->result->cbor_len = result_len;
+            decoder->is_complete_flag = true;
+          }
+        }
+      }
+    } else {
+      decoder->last_error = UR_DECODER_ERROR_INVALID_CHECKSUM;
+      decoder->is_complete_flag = true;
+    }
+  }
+
+  free(type);
+  free_string_array(components, component_count);
+  free(components);
+  return success;
 }
 
 bool ur_decoder_is_complete(ur_decoder_t *decoder) {
-    return decoder ? decoder->is_complete_flag : false;
+  return decoder ? decoder->is_complete_flag : false;
 }
 
 bool ur_decoder_is_success(ur_decoder_t *decoder) {
-    return decoder && decoder->is_complete_flag && decoder->result != NULL;
+  return decoder && decoder->is_complete_flag && decoder->result != NULL;
 }
 
 bool ur_decoder_is_failure(ur_decoder_t *decoder) {
-    return decoder && decoder->is_complete_flag && decoder->result == NULL;
+  return decoder && decoder->is_complete_flag && decoder->result == NULL;
 }
 
 ur_result_t *ur_decoder_get_result(ur_decoder_t *decoder) {
-    if (!decoder || !ur_decoder_is_success(decoder)) {
-        return NULL;
-    }
-    return decoder->result;
+  if (!decoder || !ur_decoder_is_success(decoder)) {
+    return NULL;
+  }
+  return decoder->result;
 }
 
 size_t ur_decoder_expected_part_count(ur_decoder_t *decoder) {
-    if (!decoder || !decoder->fountain_decoder) return 0;
-    return fountain_decoder_expected_part_count(decoder->fountain_decoder);
+  if (!decoder || !decoder->fountain_decoder)
+    return 0;
+  return fountain_decoder_expected_part_count(decoder->fountain_decoder);
 }
 
 size_t ur_decoder_processed_parts_count(ur_decoder_t *decoder) {
-    if (!decoder || !decoder->fountain_decoder) return 0;
-    return decoder->fountain_decoder->processed_parts_count;
+  if (!decoder || !decoder->fountain_decoder)
+    return 0;
+  return decoder->fountain_decoder->processed_parts_count;
 }
 
 double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder) {
-    if (!decoder || !decoder->fountain_decoder) return 0.0;
-    return fountain_decoder_estimated_percent_complete(decoder->fountain_decoder);
+  if (!decoder || !decoder->fountain_decoder)
+    return 0.0;
+  return fountain_decoder_estimated_percent_complete(decoder->fountain_decoder);
 }
 
 ur_decoder_error_t ur_decoder_get_last_error(ur_decoder_t *decoder) {
-    return decoder ? decoder->last_error : UR_DECODER_ERROR_NULL_POINTER;
+  return decoder ? decoder->last_error : UR_DECODER_ERROR_NULL_POINTER;
 }
 
-ur_decoder_error_t ur_decoder_decode_single(const char *ur_string, ur_result_t **result) {
-    if (!ur_string || !result) return UR_DECODER_ERROR_NULL_POINTER;
+ur_decoder_error_t ur_decoder_decode_single(const char *ur_string,
+                                            ur_result_t **result) {
+  if (!ur_string || !result)
+    return UR_DECODER_ERROR_NULL_POINTER;
 
-    char *type;
-    char **components;
-    size_t component_count;
+  char *type;
+  char **components;
+  size_t component_count;
 
-    if (!parse_ur_string(ur_string, &type, &components, &component_count)) {
-        return UR_DECODER_ERROR_INVALID_SCHEME;
-    }
+  if (!parse_ur_string(ur_string, &type, &components, &component_count)) {
+    return UR_DECODER_ERROR_INVALID_SCHEME;
+  }
 
-    if (component_count != 1) {
-        free(type);
-        free_string_array(components, component_count);
-        free(components);
-        return UR_DECODER_ERROR_INVALID_PATH_LENGTH;
-    }
-
-    *result = decode_single_part(type, components[0]);
-
+  if (component_count != 1) {
     free(type);
     free_string_array(components, component_count);
     free(components);
+    return UR_DECODER_ERROR_INVALID_PATH_LENGTH;
+  }
 
-    return *result ? UR_DECODER_OK : UR_DECODER_ERROR_INVALID_FRAGMENT;
+  *result = decode_single_part(type, components[0]);
+
+  free(type);
+  free_string_array(components, component_count);
+  free(components);
+
+  return *result ? UR_DECODER_OK : UR_DECODER_ERROR_INVALID_FRAGMENT;
 }
 
 void ur_result_free(ur_result_t *result) {
-    if (!result) return;
+  if (!result)
+    return;
 
-    if (result->type) {
-        free(result->type);
-    }
-    if (result->cbor_data) {
-        free(result->cbor_data);
-    }
-    free(result);
+  if (result->type) {
+    free(result->type);
+  }
+  if (result->cbor_data) {
+    free(result->cbor_data);
+  }
+  free(result);
 }

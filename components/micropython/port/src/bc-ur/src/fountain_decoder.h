@@ -1,100 +1,100 @@
 #ifndef FOUNTAIN_DECODER_H
 #define FOUNTAIN_DECODER_H
 
-#include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Forward declarations
 typedef struct fountain_decoder fountain_decoder_t;
 
 // Part indexes set (simplified as dynamic array for C)
 typedef struct {
-    size_t *indexes;
-    size_t count;
-    size_t capacity;
+  size_t *indexes;
+  size_t count;
+  size_t capacity;
 } part_indexes_t;
 
 // Fountain encoder part structure
 typedef struct {
-    uint32_t seq_num;
-    size_t seq_len;
-    size_t message_len;
-    uint32_t checksum;
-    uint8_t *data;
-    size_t data_len;
+  uint32_t seq_num;
+  size_t seq_len;
+  size_t message_len;
+  uint32_t checksum;
+  uint8_t *data;
+  size_t data_len;
 } fountain_encoder_part_t;
 
 // Internal decoder part structure
 typedef struct {
-    part_indexes_t indexes;
-    uint8_t *data;
-    size_t data_len;
+  part_indexes_t indexes;
+  uint8_t *data;
+  size_t data_len;
 } decoder_part_t;
 
 // Queue for processing parts
 typedef struct {
-    decoder_part_t *parts;
-    size_t front;
-    size_t rear;
-    size_t count;
-    size_t capacity;
+  decoder_part_t *parts;
+  size_t front;
+  size_t rear;
+  size_t count;
+  size_t capacity;
 } part_queue_t;
 
 // Stored part for reconstruction
 typedef struct {
-    uint8_t *data;
-    size_t data_len;
-    bool received;
+  uint8_t *data;
+  size_t data_len;
+  bool received;
 } stored_part_t;
 
 // Fountain decoder result
 typedef struct {
-    uint8_t *data;
-    size_t data_len;
-    bool is_success;
-    bool is_error;
+  uint8_t *data;
+  size_t data_len;
+  bool is_success;
+  bool is_error;
 } fountain_decoder_result_t;
 
 // Fountain decoder structure
 typedef struct fountain_decoder {
-    part_indexes_t received_part_indexes;
-    part_indexes_t *last_part_indexes;
-    size_t processed_parts_count;
-    fountain_decoder_result_t *result;
-    part_indexes_t *expected_part_indexes;
-    size_t expected_fragment_len;
-    size_t expected_message_len;
-    uint32_t expected_checksum;
+  part_indexes_t received_part_indexes;
+  part_indexes_t *last_part_indexes;
+  size_t processed_parts_count;
+  fountain_decoder_result_t *result;
+  part_indexes_t *expected_part_indexes;
+  size_t expected_fragment_len;
+  size_t expected_message_len;
+  uint32_t expected_checksum;
 
-    // Parts storage for sequential reconstruction
-    stored_part_t *parts;
-    size_t parts_capacity;
+  // Parts storage for sequential reconstruction
+  stored_part_t *parts;
+  size_t parts_capacity;
 
-    // Simple parts storage (key: single index, value: data)
-    struct {
-        size_t *keys;
-        decoder_part_t *values;
-        size_t *value_lens;
-        size_t count;
-        size_t capacity;
-    } simple_parts;
+  // Simple parts storage (key: single index, value: data)
+  struct {
+    size_t *keys;
+    decoder_part_t *values;
+    size_t *value_lens;
+    size_t count;
+    size_t capacity;
+  } simple_parts;
 
-    // Mixed parts storage (more complex, simplified for now)
-    struct {
-        part_indexes_t *key_sets;
-        decoder_part_t *values;
-        size_t *value_lens;
-        size_t count;
-        size_t capacity;
-    } mixed_parts;
+  // Mixed parts storage (more complex, simplified for now)
+  struct {
+    part_indexes_t *key_sets;
+    decoder_part_t *values;
+    size_t *value_lens;
+    size_t count;
+    size_t capacity;
+  } mixed_parts;
 
-    // Processing queue
-    part_queue_t queue;
+  // Processing queue
+  part_queue_t queue;
 
-    // Duplicate detection: store last fragment sequence number
-    uint32_t last_fragment_seq_num;
-    bool has_received_fragment;
+  // Duplicate detection: store last fragment sequence number
+  uint32_t last_fragment_seq_num;
+  bool has_received_fragment;
 } fountain_decoder_t;
 
 // Function declarations
@@ -117,7 +117,8 @@ void fountain_decoder_free(fountain_decoder_t *decoder);
  * @param part Pointer to encoder part
  * @return true on success, false on error
  */
-bool fountain_decoder_receive_part(fountain_decoder_t *decoder, fountain_encoder_part_t *part);
+bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
+                                   fountain_encoder_part_t *part);
 
 /**
  * Check if decoding is complete

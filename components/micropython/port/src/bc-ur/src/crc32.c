@@ -1,37 +1,38 @@
 #include "crc32.h"
 #include <stdbool.h>
 
-// CRC32 lookup table (IEEE 802.3 polynomial)
 static uint32_t crc32_table[256];
 static bool crc32_table_initialized = false;
 
 void crc32_init(void) {
-    if (crc32_table_initialized) return;
+  if (crc32_table_initialized)
+    return;
 
-    const uint32_t polynomial = 0xEDB88320;
+  const uint32_t polynomial = 0xEDB88320;
 
-    for (uint32_t i = 0; i < 256; i++) {
-        uint32_t crc = i;
-        for (int j = 8; j > 0; j--) {
-            if (crc & 1) {
-                crc = (crc >> 1) ^ polynomial;
-            } else {
-                crc >>= 1;
-            }
-        }
-        crc32_table[i] = crc;
+  for (uint32_t i = 0; i < 256; i++) {
+    uint32_t crc = i;
+    for (int j = 8; j > 0; j--) {
+      if (crc & 1) {
+        crc = (crc >> 1) ^ polynomial;
+      } else {
+        crc >>= 1;
+      }
     }
-    crc32_table_initialized = true;
+    crc32_table[i] = crc;
+  }
+  crc32_table_initialized = true;
 }
 
 uint32_t crc32_calculate(const uint8_t *data, size_t length) {
-    if (!data || length == 0) return 0;
+  if (!data || length == 0)
+    return 0;
 
-    crc32_init();
+  crc32_init();
 
-    uint32_t crc = 0xFFFFFFFF;  // MAX_UINT32 & ~0
-    for (size_t i = 0; i < length; i++) {
-        crc = (crc >> 8) ^ crc32_table[(crc ^ data[i]) & 0xFF];
-    }
-    return ~crc & 0xFFFFFFFF;  // MAX_UINT32 & ~crc
+  uint32_t crc = 0xFFFFFFFF;
+  for (size_t i = 0; i < length; i++) {
+    crc = (crc >> 8) ^ crc32_table[(crc ^ data[i]) & 0xFF];
+  }
+  return ~crc & 0xFFFFFFFF;
 }

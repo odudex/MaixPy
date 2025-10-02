@@ -1,25 +1,25 @@
 #ifndef FOUNTAIN_UTILS_H
 #define FOUNTAIN_UTILS_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include "fountain_decoder.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /**
  * Simple PRNG for fountain coding (Xoshiro256**)
  */
 typedef struct {
-    uint64_t state[4];
+  uint64_t state[4];
 } prng_state_t;
 
 /**
  * Random sampler for degree selection using alias method
  */
 typedef struct {
-    double *probs;
-    int *aliases;
-    size_t count;
+  double *probs;
+  int *aliases;
+  size_t count;
 } random_sampler_t;
 
 /**
@@ -35,7 +35,8 @@ void prng_init(prng_state_t *prng, const uint8_t seed[8]);
  * @param seed Seed bytes
  * @param seed_len Length of seed
  */
-void prng_init_from_bytes(prng_state_t *prng, const uint8_t *seed, size_t seed_len);
+void prng_init_from_bytes(prng_state_t *prng, const uint8_t *seed,
+                          size_t seed_len);
 
 /**
  * Generate next random integer in range [min, max]
@@ -60,7 +61,8 @@ double prng_next_double(prng_state_t *prng);
  * @param count Number of probabilities
  * @return true on success
  */
-bool random_sampler_init(random_sampler_t *sampler, double *probs, size_t count);
+bool random_sampler_init(random_sampler_t *sampler, double *probs,
+                         size_t count);
 
 /**
  * Free random sampler resources
@@ -84,7 +86,8 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng);
  * @param result Output part indexes
  * @return true on success
  */
-bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result);
+bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
+                      part_indexes_t *result);
 
 /**
  * Check if part_indexes_a is strict subset of part_indexes_b
@@ -92,7 +95,8 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum, part_
  * @param b Second set
  * @return true if a is strict subset of b
  */
-bool part_indexes_is_strict_subset(const part_indexes_t *a, const part_indexes_t *b);
+bool part_indexes_is_strict_subset(const part_indexes_t *a,
+                                   const part_indexes_t *b);
 
 /**
  * Set difference: result = a - b
@@ -101,7 +105,8 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a, const part_indexes_t
  * @param result Output set (a - b)
  * @return true on success
  */
-bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b, part_indexes_t *result);
+bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
+                             part_indexes_t *result);
 
 /**
  * Check if two part_indexes are equal
@@ -125,7 +130,8 @@ bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
  * @param b Second set
  * @return true if they share any indexes
  */
-bool part_indexes_have_intersection(const part_indexes_t *a, const part_indexes_t *b);
+bool part_indexes_have_intersection(const part_indexes_t *a,
+                                    const part_indexes_t *b);
 
 /**
  * Calculate symmetric difference between two part_indexes sets
@@ -134,7 +140,9 @@ bool part_indexes_have_intersection(const part_indexes_t *a, const part_indexes_
  * @param result Output set (A ⊕ B)
  * @return true on success
  */
-bool part_indexes_symmetric_difference(const part_indexes_t *a, const part_indexes_t *b, part_indexes_t *result);
+bool part_indexes_symmetric_difference(const part_indexes_t *a,
+                                       const part_indexes_t *b,
+                                       part_indexes_t *result);
 
 /**
  * Join fragments into a single message, taking only message_len bytes
@@ -145,7 +153,7 @@ bool part_indexes_symmetric_difference(const part_indexes_t *a, const part_index
  * @param result Output buffer (allocated by caller)
  * @return true on success
  */
-bool join_fragments(uint8_t **fragments, size_t *fragment_lens, size_t fragment_count,
-                   size_t message_len, uint8_t *result);
+bool join_fragments(uint8_t **fragments, size_t *fragment_lens,
+                    size_t fragment_count, size_t message_len, uint8_t *result);
 
 #endif // FOUNTAIN_UTILS_H

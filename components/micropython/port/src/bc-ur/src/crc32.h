@@ -1,8 +1,8 @@
 #ifndef CRC32_H
 #define CRC32_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * Calculate CRC32 checksum for data
