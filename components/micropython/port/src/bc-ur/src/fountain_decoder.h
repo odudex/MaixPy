@@ -1,12 +1,15 @@
 #ifndef FOUNTAIN_DECODER_H
 #define FOUNTAIN_DECODER_H
 
+// #define DEBUG_STATS
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 // Forward declarations
 typedef struct fountain_decoder fountain_decoder_t;
+typedef struct mixed_parts_hash mixed_parts_hash_t;
 
 // Part indexes set (simplified as dynamic array for C)
 typedef struct {
@@ -41,13 +44,6 @@ typedef struct {
   size_t capacity;
 } part_queue_t;
 
-// Stored part for reconstruction
-typedef struct {
-  uint8_t *data;
-  size_t data_len;
-  bool received;
-} stored_part_t;
-
 // Fountain decoder result
 typedef struct {
   uint8_t *data;
@@ -67,10 +63,6 @@ typedef struct fountain_decoder {
   size_t expected_message_len;
   uint32_t expected_checksum;
 
-  // Parts storage for sequential reconstruction
-  stored_part_t *parts;
-  size_t parts_capacity;
-
   // Simple parts storage (key: single index, value: data)
   struct {
     size_t *keys;
@@ -80,14 +72,8 @@ typedef struct fountain_decoder {
     size_t capacity;
   } simple_parts;
 
-  // Mixed parts storage (more complex, simplified for now)
-  struct {
-    part_indexes_t *key_sets;
-    decoder_part_t *values;
-    size_t *value_lens;
-    size_t count;
-    size_t capacity;
-  } mixed_parts;
+  // Hash-based mixed parts storage
+  mixed_parts_hash_t *mixed_parts_hash;
 
   // Processing queue
   part_queue_t queue;
@@ -95,6 +81,16 @@ typedef struct fountain_decoder {
   // Duplicate detection: store last fragment sequence number
   uint32_t last_fragment_seq_num;
   bool has_received_fragment;
+
+#ifdef DEBUG_STATS
+  // Statistics for resource tracking
+  size_t maximum_mixed_parts;
+  size_t mixed_from_fragments; // Mixed parts directly from received fragments
+  size_t mixed_from_reduction; // Mixed parts created by reduce_mixed_by
+  size_t mixed_from_cross_reduction; // Mixed parts created by
+                                     // reduce_mixed_against_mixed
+  size_t mixed_parts_useful;         // Mixed parts that led to simple parts
+#endif
 } fountain_decoder_t;
 
 // Function declarations

@@ -23,13 +23,6 @@ typedef struct {
 } random_sampler_t;
 
 /**
- * Initialize PRNG with seed
- * @param prng PRNG state
- * @param seed 8-byte seed
- */
-void prng_init(prng_state_t *prng, const uint8_t seed[8]);
-
-/**
  * Initialize PRNG with seed using SHA256 (matching Python behavior)
  * @param prng PRNG state
  * @param seed Seed bytes

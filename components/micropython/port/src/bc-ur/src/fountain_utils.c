@@ -25,25 +25,6 @@ static uint64_t rotl(const uint64_t x, int k) {
   return (x << k) | (x >> (64 - k));
 }
 
-void prng_init(prng_state_t *prng, const uint8_t seed[8]) {
-  if (!prng || !seed)
-    return;
-
-  uint64_t seed_value = 0;
-  for (int i = 0; i < 8; i++) {
-    seed_value |= ((uint64_t)seed[i]) << (i * 8);
-  }
-
-  prng->state[0] = seed_value;
-  prng->state[1] = prng->state[0] ^ 0x9E3779B97F4A7C15ULL;
-  prng->state[2] = prng->state[1] ^ 0x6A09E667F3BCC908ULL;
-  prng->state[3] = prng->state[2] ^ 0xBB67AE8584CAA73BULL;
-
-  for (int i = 0; i < 12; i++) {
-    prng_next_int(prng, 0, 1);
-  }
-}
-
 void prng_init_from_bytes(prng_state_t *prng, const uint8_t *seed,
                           size_t seed_len) {
   if (!prng || !seed)
