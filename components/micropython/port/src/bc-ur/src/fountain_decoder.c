@@ -1003,16 +1003,16 @@ static void process_simple_part(fountain_decoder_t *const decoder,
         }
 #ifdef DEBUG_STATS
         printf("=== Mixed Parts Statistics ===\n");
-        printf("Maximum mixed parts reached: %zu\n",
+        printf("Maximum mixed parts reached: %u\n",
                decoder->maximum_mixed_parts);
-        printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
-        printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
-        printf("  From cross-reduction: %zu\n",
+        printf("  From fragments: %u\n", decoder->mixed_from_fragments);
+        printf("  From reduction: %u\n", decoder->mixed_from_reduction);
+        printf("  From cross-reduction: %u\n",
                decoder->mixed_from_cross_reduction);
-        printf("  Total created: %zu\n",
+        printf("  Total created: %u\n",
                decoder->mixed_from_fragments + decoder->mixed_from_reduction +
                    decoder->mixed_from_cross_reduction);
-        printf("Mixed parts that were useful: %zu\n",
+        printf("Mixed parts that were useful: %u\n",
                decoder->mixed_parts_useful);
 #endif
       } else {
