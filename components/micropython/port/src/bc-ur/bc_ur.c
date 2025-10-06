@@ -16,6 +16,7 @@ typedef struct {
 typedef struct {
     mp_obj_base_t base;
     ur_encoder_t *encoder;
+    mp_obj_t fountain_encoder_cached; // Cached fountain_encoder wrapper to prevent memory leaks
 } mp_obj_ur_encoder_t;
 
 // Forward declarations
@@ -409,6 +410,7 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args, si
     // Create encoder
     mp_obj_ur_encoder_t *self = m_new_obj(mp_obj_ur_encoder_t);
     self->base.type = type;
+    self->fountain_encoder_cached = MP_OBJ_NULL; // Initialize cache to NULL
 
     // Create internal encoder
     const char *ur_type = ur_get_type(ur_obj->ur);
@@ -540,15 +542,21 @@ static void ur_encoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (dest[0] == MP_OBJ_NULL) {
         // Load attribute
         if (attr == MP_QSTR_fountain_encoder) {
-            // Create a fountain encoder wrapper object
+            // Return cached fountain encoder wrapper to prevent memory leaks
             if (!self->encoder || !self->encoder->fountain_encoder) {
                 dest[0] = mp_const_none;
                 return;
             }
-            mp_obj_fountain_encoder_wrapper_t *fe_wrapper = m_new_obj(mp_obj_fountain_encoder_wrapper_t);
-            fe_wrapper->base.type = &mp_type_fountain_encoder_wrapper;
-            fe_wrapper->encoder = self->encoder;
-            dest[0] = MP_OBJ_FROM_PTR(fe_wrapper);
+
+            // If not cached yet, create and cache the wrapper
+            if (self->fountain_encoder_cached == MP_OBJ_NULL) {
+                mp_obj_fountain_encoder_wrapper_t *fe_wrapper = m_new_obj(mp_obj_fountain_encoder_wrapper_t);
+                fe_wrapper->base.type = &mp_type_fountain_encoder_wrapper;
+                fe_wrapper->encoder = self->encoder;
+                self->fountain_encoder_cached = MP_OBJ_FROM_PTR(fe_wrapper);
+            }
+
+            dest[0] = self->fountain_encoder_cached;
         } else {
             // For other attributes (methods), check locals_dict explicitly
             mp_obj_dict_t *locals_dict = (mp_obj_dict_t *)&ur_encoder_locals_dict;
