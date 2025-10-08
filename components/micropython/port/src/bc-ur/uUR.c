@@ -594,4 +594,4 @@ const mp_obj_module_t bc_ur_module = {
     .globals = (mp_obj_dict_t *)&bc_ur_globals,
 };
 
-MP_REGISTER_MODULE(MP_QSTR_bc_ur, bc_ur_module, MODULE_BC_UR_ENABLED);
+MP_REGISTER_MODULE(MP_QSTR_uUR, bc_ur_module, MODULE_BC_UR_ENABLED);
