@@ -1,8 +1,15 @@
 //
 // fountain_encoder.c
 //
-// Copyright © 2020 Blockchain Commons, LLC
+// Copyright © 2025 Krux Contributors
 // Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Implementation of fountain codes for efficient multi-part data transmission.
+// Based on the specification:
+// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-006-urtypes.md
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
 //
 
 #include "fountain_encoder.h"
@@ -69,8 +76,8 @@ bool fragment_array_add(fragment_array_t *arr, const uint8_t *data,
 // Encoder functions
 
 size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
-                                                      size_t min_fragment_len,
-                                                      size_t max_fragment_len) {
+                                                     size_t min_fragment_len,
+                                                     size_t max_fragment_len) {
   if (message_len == 0 || min_fragment_len == 0 ||
       max_fragment_len < min_fragment_len) {
     return 0;
@@ -91,8 +98,7 @@ size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
 }
 
 bool fountain_encoder_partition_message(const uint8_t *message,
-                                        size_t message_len,
-                                        size_t fragment_len,
+                                        size_t message_len, size_t fragment_len,
                                         fragment_array_t *fragments) {
   if (!message || !fragments || message_len == 0 || fragment_len == 0) {
     return false;
@@ -158,9 +164,8 @@ fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
     return NULL;
   }
 
-  if (!fountain_encoder_partition_message(message, message_len,
-                                          encoder->fragment_len,
-                                          &encoder->fragments)) {
+  if (!fountain_encoder_partition_message(
+          message, message_len, encoder->fragment_len, &encoder->fragments)) {
     free(encoder);
     return NULL;
   }

@@ -1,8 +1,14 @@
 //
 // ur_encoder.c
 //
-// Copyright © 2020 Blockchain Commons, LLC
+// Copyright © 2025 Krux Contributors
 // Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Implementation of Uniform Resources (UR) encoder following the specification:
+// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-005-ur.md
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
 //
 
 #include "ur_encoder.h"
@@ -50,7 +56,7 @@ static char *encode_ur(const char **path_components, size_t component_count) {
 }
 
 bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
-                               size_t cbor_len, char **ur_string_out) {
+                              size_t cbor_len, char **ur_string_out) {
   if (!type || !cbor_data || cbor_len == 0 || !ur_string_out) {
     return false;
   }
@@ -77,8 +83,8 @@ bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
 }
 
 ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
-                              size_t cbor_len, size_t max_fragment_len,
-                              uint32_t first_seq_num, size_t min_fragment_len) {
+                             size_t cbor_len, size_t max_fragment_len,
+                             uint32_t first_seq_num, size_t min_fragment_len) {
   if (!type || !cbor_data || cbor_len == 0) {
     return NULL;
   }
@@ -145,7 +151,8 @@ size_t ur_encoder_seq_len(const ur_encoder_t *encoder) {
   return fountain_encoder_seq_len(encoder->fountain_encoder);
 }
 
-const part_indexes_t *ur_encoder_last_part_indexes(const ur_encoder_t *encoder) {
+const part_indexes_t *
+ur_encoder_last_part_indexes(const ur_encoder_t *encoder) {
   if (!encoder || !encoder->fountain_encoder) {
     return NULL;
   }
@@ -175,7 +182,7 @@ static bool encode_part(const char *type, const fountain_encoder_part_t *part,
 
   // Create sequence string: "seq_num-seq_len"
   char seq_str[64];
-  snprintf(seq_str, sizeof(seq_str), "%u-%u", part->seq_num, part->seq_len);
+  snprintf(seq_str, sizeof(seq_str), "%u-%zu", part->seq_num, part->seq_len);
 
   // Encode part to CBOR
   uint8_t *cbor = NULL;
@@ -186,8 +193,7 @@ static bool encode_part(const char *type, const fountain_encoder_part_t *part,
 
   // Encode CBOR to bytewords (with CRC32 checksum)
   char *bytewords = NULL;
-  if (!bytewords_encode(BYTEWORDS_STYLE_MINIMAL, cbor, cbor_len,
-                        &bytewords)) {
+  if (!bytewords_encode(BYTEWORDS_STYLE_MINIMAL, cbor, cbor_len, &bytewords)) {
     free(cbor);
     return false;
   }

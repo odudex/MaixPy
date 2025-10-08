@@ -1,3 +1,15 @@
+//
+// crc32.c
+//
+// Copyright © 2025 Krux Contributors
+// Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// CRC32 checksum implementation for data integrity verification.
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
+//
+
 #include "crc32.h"
 #include <stdbool.h>
 

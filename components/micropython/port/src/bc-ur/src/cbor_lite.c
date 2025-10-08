@@ -1,6 +1,15 @@
-/*
- * cbor_lite.c - Lightweight CBOR encoder/decoder implementation
- */
+//
+// cbor_lite.c
+//
+// Copyright © 2025 Krux Contributors
+// Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Lightweight CBOR encoder/decoder implementation for UR encoding.
+// Follows CBOR specification RFC 8949.
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
+//
 
 #include "cbor_lite.h"
 #include <stdlib.h>
@@ -52,7 +61,7 @@ static bool append_byte(cbor_encoder_t *enc, uint8_t byte) {
 
 // Helper: Encode tag and value
 static bool encode_tag_and_value(cbor_encoder_t *enc, uint8_t major_type,
-                                  uint64_t value) {
+                                 uint64_t value) {
   size_t length = get_byte_length(value);
 
   if (length == 0) {
@@ -168,7 +177,7 @@ void cbor_decoder_init(cbor_decoder_t *dec, const uint8_t *buffer,
 
 // Helper: Decode tag and additional info
 static bool decode_tag_and_additional(cbor_decoder_t *dec, uint8_t *major_out,
-                                       uint8_t *additional_out) {
+                                      uint8_t *additional_out) {
   if (!dec || dec->pos >= dec->size)
     return false;
 
@@ -180,8 +189,8 @@ static bool decode_tag_and_additional(cbor_decoder_t *dec, uint8_t *major_out,
 
 // Helper: Decode value from additional info
 static bool decode_value_from_additional(cbor_decoder_t *dec,
-                                          uint8_t additional,
-                                          uint64_t *value_out) {
+                                         uint8_t additional,
+                                         uint64_t *value_out) {
   if (!dec || !value_out)
     return false;
 

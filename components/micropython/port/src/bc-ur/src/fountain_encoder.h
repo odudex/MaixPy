@@ -1,10 +1,10 @@
 #ifndef FOUNTAIN_ENCODER_H
 #define FOUNTAIN_ENCODER_H
 
+#include "fountain_decoder.h" // For part_indexes_t
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "fountain_decoder.h" // For part_indexes_t
 
 /**
  * Fountain Encoder for Luby Transform rateless coding
@@ -40,8 +40,8 @@ typedef struct fountain_encoder {
  * @return Optimal fragment length, or 0 on error
  */
 size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
-                                                      size_t min_fragment_len,
-                                                      size_t max_fragment_len);
+                                                     size_t min_fragment_len,
+                                                     size_t max_fragment_len);
 
 /**
  * Partition message into fragments
@@ -52,8 +52,7 @@ size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
  * @return true on success
  */
 bool fountain_encoder_partition_message(const uint8_t *message,
-                                        size_t message_len,
-                                        size_t fragment_len,
+                                        size_t message_len, size_t fragment_len,
                                         fragment_array_t *fragments);
 
 /**
@@ -141,7 +140,6 @@ void fountain_encoder_part_free(fountain_encoder_part_t *part);
 // Fragment array operations
 bool fragment_array_init(fragment_array_t *arr, size_t capacity);
 void fragment_array_free(fragment_array_t *arr);
-bool fragment_array_add(fragment_array_t *arr, const uint8_t *data,
-                        size_t len);
+bool fragment_array_add(fragment_array_t *arr, const uint8_t *data, size_t len);
 
 #endif // FOUNTAIN_ENCODER_H

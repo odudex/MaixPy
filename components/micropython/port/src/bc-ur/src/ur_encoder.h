@@ -31,7 +31,7 @@ typedef struct ur_encoder {
  * @return true on success
  */
 bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
-                               size_t cbor_len, char **ur_string_out);
+                              size_t cbor_len, char **ur_string_out);
 
 /**
  * Create new UR encoder for multi-part encoding
@@ -44,8 +44,8 @@ bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
  * @return Pointer to encoder or NULL on error
  */
 ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
-                              size_t cbor_len, size_t max_fragment_len,
-                              uint32_t first_seq_num, size_t min_fragment_len);
+                             size_t cbor_len, size_t max_fragment_len,
+                             uint32_t first_seq_num, size_t min_fragment_len);
 
 /**
  * Free UR encoder

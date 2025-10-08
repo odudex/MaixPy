@@ -1,3 +1,17 @@
+//
+// fountain_decoder.c
+//
+// Copyright © 2025 Krux Contributors
+// Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Implementation of fountain code decoder for multi-part data reassembly.
+// Based on the specification:
+// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-006-urtypes.md
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
+//
+
 #include "fountain_decoder.h"
 #include "crc32.h"
 #include "fountain_utils.h"
@@ -1003,16 +1017,16 @@ static void process_simple_part(fountain_decoder_t *const decoder,
         }
 #ifdef DEBUG_STATS
         printf("=== Mixed Parts Statistics ===\n");
-        printf("Maximum mixed parts reached: %u\n",
+        printf("Maximum mixed parts reached: %zu\n",
                decoder->maximum_mixed_parts);
-        printf("  From fragments: %u\n", decoder->mixed_from_fragments);
-        printf("  From reduction: %u\n", decoder->mixed_from_reduction);
-        printf("  From cross-reduction: %u\n",
+        printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
+        printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
+        printf("  From cross-reduction: %zu\n",
                decoder->mixed_from_cross_reduction);
-        printf("  Total created: %u\n",
+        printf("  Total created: %zu\n",
                decoder->mixed_from_fragments + decoder->mixed_from_reduction +
                    decoder->mixed_from_cross_reduction);
-        printf("Mixed parts that were useful: %u\n",
+        printf("Mixed parts that were useful: %zu\n",
                decoder->mixed_parts_useful);
 #endif
       } else {
@@ -1145,13 +1159,16 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     // Initialize hash table with dynamic size based on seq_len
     //
     // Hash capacity heuristic rationale:
-    // 1. Mixed parts are created from fragments with degree > 1 (multiple indexes)
-    // 2. In the worst case, we might store up to ~seq_len mixed parts simultaneously
+    // 1. Mixed parts are created from fragments with degree > 1 (multiple
+    // indexes)
+    // 2. In the worst case, we might store up to ~seq_len mixed parts
+    // simultaneously
     // 3. Using seq_len * 2 as capacity provides:
     //    - Load factor of ~0.5 at maximum occupancy (good hash performance)
     //    - Reduces collision chains in the hash table
     //    - Balance between memory usage and lookup speed
-    // 4. Minimum of HASH_MIN_CAPACITY (64) for small messages ensures reasonable
+    // 4. Minimum of HASH_MIN_CAPACITY (64) for small messages ensures
+    // reasonable
     //    performance even when seq_len is very small (e.g., < 32 fragments)
     // 5. Note: Actual mixed parts count is typically much lower than seq_len
     //    due to Gaussian elimination reducing them to simple parts

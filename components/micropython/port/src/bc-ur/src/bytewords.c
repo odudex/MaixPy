@@ -1,3 +1,16 @@
+//
+// bytewords.c
+//
+// Copyright © 2025 Krux Contributors
+// Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Implementation of Bytewords encoding/decoding as specified in:
+// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-012-bytewords.md
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
+//
+
 #include "bytewords.h"
 #include "crc32.h"
 #include "utils.h"

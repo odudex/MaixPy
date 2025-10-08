@@ -1,3 +1,15 @@
+//
+// fountain_utils.c
+//
+// Copyright © 2025 Krux Contributors
+// Licensed under the "BSD-2-Clause Plus Patent License"
+//
+// Utility functions for fountain code operations.
+//
+// This is an independent implementation written using
+// foundation-ur-py as a reference for testing and validation.
+//
+
 #include "fountain_utils.h"
 #include "sha256.h"
 #include "utils.h"
