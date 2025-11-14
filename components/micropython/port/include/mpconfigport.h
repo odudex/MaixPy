@@ -492,6 +492,13 @@ extern const struct _mp_obj_module_t mp_module_touchscreen;
     #define MODULE_BC_UR_ENABLED (1)
 #endif
 
+#ifndef CONFIG_MAIXPY_URTYPES_ENABLE
+    #define CONFIG_MAIXPY_URTYPES_ENABLE (0)
+#endif
+#if CONFIG_MAIXPY_URTYPES_ENABLE
+    #define MODULE_URTYPES_ENABLED (1)
+#endif
+
 #if CONFIG_MAIXPY_NETWORK_ENABLE
 #define MAIXPY_NETWORK_DEF \
     { MP_OBJ_NEW_QSTR(MP_QSTR_network), (mp_obj_t)&network_module }, \

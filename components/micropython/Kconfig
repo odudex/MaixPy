@@ -186,6 +186,10 @@ menu "Micropython configurations"
 			bool "Enable bc-ur module (Blockchain Commons UR for QR codes)"
 			default n
 
+		config MAIXPY_URTYPES_ENABLE
+			bool "Enable urtypes module (C implementation of UR Types for crypto)"
+			default n
+
 		config MAIXPY_USE_MEMZIP
 			bool "Use memzip instead of frozen mpy"
 			default n

@@ -474,6 +474,13 @@ if(CONFIG_COMPONENT_MICROPYTHON_ENABLE)
         append_srcs_dir(ADD_SRCS "port/src/bc-ur")
         append_srcs_dir(ADD_SRCS "port/src/bc-ur/src")
     endif()
+    # bc-urtypes (UR Types for crypto data structures)
+    if(CONFIG_MAIXPY_URTYPES_ENABLE)
+        list(APPEND ADD_INCLUDE "${mpy_port_dir}/src/bc-urtypes")
+        list(APPEND ADD_INCLUDE "${mpy_port_dir}/src/bc-urtypes/src")
+        append_srcs_dir(ADD_SRCS "port/src/bc-urtypes")
+        append_srcs_dir(ADD_SRCS "port/src/bc-urtypes/src")
+    endif()
     #############################################
 
     ################## FLAGS ####################
