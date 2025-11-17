@@ -12,19 +12,22 @@ registry_type_t BYTES_TYPE = {
 
 // Create and destroy bytes
 bytes_data_t *bytes_new(const uint8_t *data, size_t len) {
-    if (!data || len == 0) return NULL;
-
     bytes_data_t *bytes = safe_malloc(sizeof(bytes_data_t));
     if (!bytes) return NULL;
 
-    bytes->data = safe_malloc(len);
-    if (!bytes->data) {
-        safe_free(bytes);
-        return NULL;
+    if (len > 0 && data != NULL) {
+        bytes->data = safe_malloc(len);
+        if (!bytes->data) {
+            safe_free(bytes);
+            return NULL;
+        }
+        memcpy(bytes->data, data, len);
+        bytes->len = len;
+    } else {
+        // Handle empty bytes case
+        bytes->data = NULL;
+        bytes->len = 0;
     }
-
-    memcpy(bytes->data, data, len);
-    bytes->len = len;
 
     return bytes;
 }
@@ -65,7 +68,8 @@ registry_item_t *bytes_from_data_item(cbor_value_t *data_item) {
 
     size_t len;
     const uint8_t *data = cbor_value_get_bytes(bytes_val, &len);
-    if (!data) return NULL;
+    // Allow NULL data if len is 0 (empty bytes)
+    if (!data && len > 0) return NULL;
 
     bytes_data_t *bytes = bytes_new(data, len);
     if (!bytes) return NULL;

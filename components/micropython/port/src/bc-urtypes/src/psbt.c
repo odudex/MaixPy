@@ -33,29 +33,20 @@ cbor_value_t *psbt_to_data_item(registry_item_t *item) {
 
     psbt_data_t *psbt = (psbt_data_t *)item->data;
 
-    // Create bytes value
-    cbor_value_t *bytes_val = cbor_value_new_bytes(psbt->data, psbt->len);
-    if (!bytes_val) return NULL;
-
-    // Tag it with CRYPTO_PSBT_TAG
-    return cbor_value_new_tag(CRYPTO_PSBT_TAG, bytes_val);
+    // Return plain bytes, NO TAG (PSBT inherits from Bytes)
+    return cbor_value_new_bytes(psbt->data, psbt->len);
 }
 
 registry_item_t *psbt_from_data_item(cbor_value_t *data_item) {
     if (!data_item) return NULL;
 
-    // Expect a tagged value
-    if (cbor_value_get_type(data_item) != CBOR_TYPE_TAG) return NULL;
-
-    uint64_t tag = cbor_value_get_tag(data_item);
-    if (tag != CRYPTO_PSBT_TAG) return NULL;
-
-    cbor_value_t *bytes_val = cbor_value_get_tag_content(data_item);
-    if (!bytes_val || cbor_value_get_type(bytes_val) != CBOR_TYPE_BYTES) return NULL;
+    // Expect plain bytes, NOT tagged (PSBT inherits from Bytes)
+    if (cbor_value_get_type(data_item) != CBOR_TYPE_BYTES) return NULL;
 
     size_t len;
-    const uint8_t *data = cbor_value_get_bytes(bytes_val, &len);
-    if (!data) return NULL;
+    const uint8_t *data = cbor_value_get_bytes(data_item, &len);
+    // Allow NULL data if len is 0 (empty PSBT)
+    if (!data && len > 0) return NULL;
 
     psbt_data_t *psbt = psbt_new(data, len);
     if (!psbt) return NULL;

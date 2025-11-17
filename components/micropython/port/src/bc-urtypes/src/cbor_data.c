@@ -22,20 +22,25 @@ cbor_value_t *cbor_value_new_negative_int(int64_t val) {
 }
 
 cbor_value_t *cbor_value_new_bytes(const uint8_t *data, size_t len) {
-    if (!data || len == 0) return NULL;
-
     cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
     if (!v) return NULL;
 
     v->type = CBOR_TYPE_BYTES;
-    v->value.bytes_val.data = safe_malloc(len);
-    if (!v->value.bytes_val.data) {
-        safe_free(v);
-        return NULL;
+
+    if (len > 0 && data != NULL) {
+        v->value.bytes_val.data = safe_malloc(len);
+        if (!v->value.bytes_val.data) {
+            safe_free(v);
+            return NULL;
+        }
+        memcpy(v->value.bytes_val.data, data, len);
+        v->value.bytes_val.len = len;
+    } else {
+        // Handle empty bytes case
+        v->value.bytes_val.data = NULL;
+        v->value.bytes_val.len = 0;
     }
 
-    memcpy(v->value.bytes_val.data, data, len);
-    v->value.bytes_val.len = len;
     return v;
 }
 

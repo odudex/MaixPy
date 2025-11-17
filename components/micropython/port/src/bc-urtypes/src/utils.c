@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <stdio.h>
 
 // Memory management utilities
 void *urtypes_safe_malloc(size_t size) {
@@ -210,7 +211,10 @@ void byte_buffer_free(byte_buffer_t *buf) {
 }
 
 bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
-    if (!buf || !data || len == 0) return false;
+    if (!buf) return false;
+    // Allow zero-length append (no-op) and NULL data if len is 0
+    if (len == 0) return true;
+    if (!data) return false;
 
     if (buf->len + len > buf->capacity) {
         size_t new_capacity = buf->capacity;

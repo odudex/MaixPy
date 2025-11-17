@@ -113,24 +113,18 @@ cbor_value_t *bip39_to_data_item(registry_item_t *item) {
         }
     }
 
-    // Tag the map with CRYPTO_BIP39_TAG
-    return cbor_value_new_tag(CRYPTO_BIP39_TAG, map);
+    // Return plain map, NO TAG (matches Python implementation)
+    return map;
 }
 
 registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
     if (!data_item) return NULL;
 
-    // Expect a tagged value
-    if (cbor_value_get_type(data_item) != CBOR_TYPE_TAG) return NULL;
-
-    uint64_t tag = cbor_value_get_tag(data_item);
-    if (tag != CRYPTO_BIP39_TAG) return NULL;
-
-    cbor_value_t *map = cbor_value_get_tag_content(data_item);
-    if (!map || cbor_value_get_type(map) != CBOR_TYPE_MAP) return NULL;
+    // Expect plain map, NOT tagged (matches Python implementation)
+    if (cbor_value_get_type(data_item) != CBOR_TYPE_MAP) return NULL;
 
     // Get words array (key 1)
-    cbor_value_t *words_array = get_map_value(map, 1);
+    cbor_value_t *words_array = get_map_value(data_item, 1);
     if (!words_array || cbor_value_get_type(words_array) != CBOR_TYPE_ARRAY) return NULL;
 
     size_t word_count = cbor_value_get_array_size(words_array);
@@ -162,7 +156,7 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
 
     // Get lang (key 2) if present
     char *lang = NULL;
-    cbor_value_t *lang_val = get_map_value(map, 2);
+    cbor_value_t *lang_val = get_map_value(data_item, 2);
     if (lang_val && cbor_value_get_type(lang_val) == CBOR_TYPE_STRING) {
         const char *lang_str = cbor_value_get_string(lang_val);
         lang = safe_strdup(lang_str);
