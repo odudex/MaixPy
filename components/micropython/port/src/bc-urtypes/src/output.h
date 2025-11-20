@@ -12,6 +12,9 @@
 // Output tag number
 #define CRYPTO_OUTPUT_TAG 308
 
+// Account tag number (for helper function)
+#define CRYPTO_ACCOUNT_TAG 311
+
 // Script expression tags (from BCR-2020-010)
 #define SCRIPT_EXPR_ADDR         307
 #define SCRIPT_EXPR_SH           400
@@ -68,6 +71,9 @@ output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len);
 
 // Generate output descriptor string
 char *output_descriptor(output_data_t *output, bool include_checksum);
+
+// Helper function to extract first output descriptor from Account CBOR
+char *output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t len);
 
 // Script expression helpers
 const script_expression_t *get_script_expression_by_tag(uint64_t tag);

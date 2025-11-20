@@ -372,3 +372,67 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
 
     return descriptor;
 }
+
+// Helper function to extract first output descriptor from Account CBOR
+char *output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t len) {
+    if (!account_cbor || len == 0) return NULL;
+
+    // Decode CBOR
+    cbor_value_t *cbor_val = cbor_decode(account_cbor, len);
+    if (!cbor_val) return NULL;
+
+    // Account CBOR is a plain map (not wrapped in a tag)
+    // Map structure: { 1: master_fingerprint, 2: [outputs...] }
+    if (cbor_value_get_type(cbor_val) != CBOR_TYPE_MAP) {
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    cbor_value_t *map = cbor_val;
+
+    // Get map key 2 (output_descriptors array)
+    cbor_value_t *outputs_array = cbor_map_get_int(map, 2);
+    if (!outputs_array || cbor_value_get_type(outputs_array) != CBOR_TYPE_ARRAY) {
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    // Get array size and check it has at least one element
+    size_t array_size = cbor_value_get_array_size(outputs_array);
+    if (array_size == 0) {
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    // Get first output from array
+    cbor_value_t *first_output = cbor_value_get_array_item(outputs_array, 0);
+    if (!first_output) {
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    // Parse as Output
+    registry_item_t *output_item = output_from_data_item(first_output);
+    if (!output_item) {
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    output_data_t *output = output_from_registry_item(output_item);
+    if (!output) {
+        safe_free(output_item);
+        cbor_value_free(cbor_val);
+        return NULL;
+    }
+
+    // Generate descriptor string (with checksum)
+    char *descriptor = output_descriptor(output, true);
+
+    // Cleanup
+    output_item->data = NULL;  // Prevent double free
+    safe_free(output_item);
+    cbor_value_free(cbor_val);
+    output_free(output);
+
+    return descriptor;
+}

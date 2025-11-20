@@ -304,9 +304,34 @@ static mp_obj_t output_from_cbor_py(mp_obj_t cbor_data_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_obj, output_from_cbor_py);
 
+// Output descriptor from Account CBOR (extracts first output)
+static mp_obj_t output_from_cbor_account_py(mp_obj_t cbor_data_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
+
+    // Extract first output descriptor from Account CBOR
+    char *descriptor = output_descriptor_from_cbor_account((const uint8_t *)bufinfo.buf, bufinfo.len);
+    if (!descriptor) {
+        mp_raise_msg(&mp_type_ValueError, "Failed to extract output descriptor from Account CBOR");
+    }
+
+    // Create Python string from descriptor
+    mp_obj_t result = mp_obj_new_str(descriptor, strlen(descriptor));
+
+    // Cleanup
+    free(descriptor);
+
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_account_obj, output_from_cbor_account_py);
+
 // ============================================================================
 // Module Definition
 // ============================================================================
+
+// Static string constants for UR type names (with hyphens)
+static const mp_obj_str_t crypto_psbt_type_str = {{&mp_type_str}, 0, 11, (const byte*)"crypto-psbt"};
+static const mp_obj_str_t crypto_bip39_type_str = {{&mp_type_str}, 0, 12, (const byte*)"crypto-bip39"};
 
 // Module globals table
 static const mp_rom_map_elem_t urtypes_globals_table[] = {
@@ -316,12 +341,15 @@ static const mp_rom_map_elem_t urtypes_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_BIP39), MP_ROM_PTR(&mp_type_urtypes_bip39) },
     // Module functions
     { MP_ROM_QSTR(MP_QSTR_output_from_cbor), MP_ROM_PTR(&output_from_cbor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_output_from_cbor_account), MP_ROM_PTR(&output_from_cbor_account_obj) },
     // Tag constants (integers)
     { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TAG), MP_ROM_INT(CRYPTO_PSBT_TAG) },
     { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TAG), MP_ROM_INT(CRYPTO_BIP39_TAG) },
-    // Type name constants (strings for UR type field)
-    { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TYPE), MP_ROM_QSTR(MP_QSTR_crypto_psbt) },
-    { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TYPE), MP_ROM_QSTR(MP_QSTR_crypto_bip39) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_ACCOUNT_TAG), MP_ROM_INT(CRYPTO_ACCOUNT_TAG) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_OUTPUT_TAG), MP_ROM_INT(CRYPTO_OUTPUT_TAG) },
+    // Type name constants (strings for UR type field - with proper hyphens)
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TYPE), MP_ROM_PTR(&crypto_psbt_type_str) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TYPE), MP_ROM_PTR(&crypto_bip39_type_str) },
 };
 static MP_DEFINE_CONST_DICT(urtypes_globals, urtypes_globals_table);
 
