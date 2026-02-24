@@ -20,22 +20,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Complete bytewords table - all 256 words concatenated
-static const char bytewords[] =
-    "ableacidalsoapexaquaarchatomauntawayaxisbackbaldbarnbeltbetabiasbluebodybr"
-    "agbrewbulbbuzzcalmcashcatschefcityclawcodecolacookcostcruxcurlcuspcyandark"
-    "datadaysdelidicedietdoordowndrawdropdrumdulldutyeacheasyechoedgeepicevenex"
-    "amexiteyesfactfairfernfigsfilmfishfizzflapflewfluxfoxyfreefrogfuelfundgala"
-    "gamegeargemsgiftgirlglowgoodgraygrimgurugushgyrohalfhanghardhawkheathelphi"
-    "ghhillholyhopehornhutsicedideaidleinchinkyintoirisironitemjadejazzjoinjolt"
-    "jowljudojugsjumpjunkjurykeepkenokeptkeyskickkilnkingkitekiwiknoblamblavala"
-    "zyleaflegsliarlimplionlistlogoloudloveluaulucklungmainmanymathmazememomenu"
-    "meowmildmintmissmonknailnavyneednewsnextnoonnotenumbobeyoboeomitonyxopenov"
-    "alowlspaidpartpeckplaypluspoempoolposepuffpumapurrquadquizraceramprealredo"
-    "richroadrockroofrubyruinrunsrustsafesagascarsetssilkskewslotsoapsolosongst"
-    "ubsurfswantacotasktaxitenttiedtimetinytoiltombtoystriptunatwinuglyundounit"
-    "urgeuservastveryvetovialvibeviewvisavoidvowswallwandwarmwaspwavewaxywebswh"
-    "atwhenwhizwolfworkyankyawnyellyogayurtzapszerozestzinczonezoom";
+// Minimal bytewords table: first+last character pairs for all 256 words
+// For byte i: first_char = bytewords_minimal[i*2], last_char =
+// bytewords_minimal[i*2+1]
+static const char bytewords_minimal[] = "aeadaoaxaaahamatayasbkbdbnbtbabs"
+                                        "bebybgbwbbbzcmchcscfcycwcecackct"
+                                        "cxclcpcndkdadsdidedtdrdndwdpdmdl"
+                                        "dyeheyeoeeecenemetesftfrfnfsfmfh"
+                                        "fzfpfwfxfyfefgflfdgagegrgsgtglgw"
+                                        "gdgygmgughgohfhghdhkhthphhhlhyhe"
+                                        "hnhsidiaieihiyioisinimjejzjnjtjl"
+                                        "jojsjpjkjykpkoktkskkknkgkekikblb"
+                                        "lalylflslrlplnltloldlelulklgmnmy"
+                                        "mhmemomumwmdmtmsmknlnyndnsntnnne"
+                                        "nboyoeotoxonolospdptpkpypspmplpe"
+                                        "pfpaprqdqzrerprlrorhrdrkrfryrnrs"
+                                        "rtsesasrssskswstspsosgsbsfsntotk"
+                                        "titttdtetytltbtstptatnuyuoutueur"
+                                        "vtvyvovlvevwvavdvswlwdwmwpwewyws"
+                                        "wtwnwzwfwkykynylyaytzszoztzczezm";
 
 // Optimized lookup table for fast word-to-byte mapping (2-char minimal style)
 // Uses first and last character positions to create 2D hash
@@ -87,13 +90,8 @@ static const int16_t lookup_table[] = {
     -1,  -1,  -1,  -1,  -1,  -1,  180, -1,  -1,  -1,  -1,  -1,  242, -1,  -1,
     -1};
 
-bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
-                      size_t data_len, char **encoded) {
+bool bytewords_encode(const uint8_t *data, size_t data_len, char **encoded) {
   if (!data || !encoded || data_len == 0)
-    return false;
-
-  // Only MINIMAL style supported (2-char encoding)
-  if (style != BYTEWORDS_STYLE_MINIMAL)
     return false;
 
   uint32_t crc = crc32_calculate(data, data_len);
@@ -117,9 +115,8 @@ bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
 
   char *pos = *encoded;
   for (size_t i = 0; i < total_len; i++) {
-    const char *word = bytewords + buf[i] * 4;
-    *pos++ = toupper(word[0]);
-    *pos++ = toupper(word[3]);
+    *pos++ = toupper(bytewords_minimal[buf[i] * 2]);
+    *pos++ = toupper(bytewords_minimal[buf[i] * 2 + 1]);
   }
   *pos = '\0';
 
@@ -133,13 +130,9 @@ void bytewords_free(void *ptr) {
   }
 }
 
-bool bytewords_decode_raw(bytewords_style_t style, const char *encoded,
-                          uint8_t **decoded, size_t *decoded_len) {
+bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
+                          size_t *decoded_len) {
   if (!encoded || !decoded || !decoded_len)
-    return false;
-
-  // Only MINIMAL style supported (2-char encoding)
-  if (style != BYTEWORDS_STYLE_MINIMAL)
     return false;
 
   size_t encoded_len = strlen(encoded);
@@ -175,24 +168,28 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded,
     buf[i] = (uint8_t)value;
   }
 
-  // Remove CRC (last 4 bytes)
-  if (num_bytes < 4) {
+  // Verify and remove CRC (last 4 bytes)
+  if (num_bytes < 5) {
     free(buf);
     return false;
   }
 
   size_t body_size = num_bytes - 4;
-  uint8_t *body = safe_malloc(body_size);
-  if (!body) {
+
+  // Verify CRC32 checksum in-place
+  uint32_t expected_crc = ((uint32_t)buf[body_size] << 24) |
+                          ((uint32_t)buf[body_size + 1] << 16) |
+                          ((uint32_t)buf[body_size + 2] << 8) |
+                          (uint32_t)buf[body_size + 3];
+  uint32_t actual_crc = crc32_calculate(buf, body_size);
+  if (expected_crc != actual_crc) {
     free(buf);
     return false;
   }
 
-  memcpy(body, buf, body_size);
-
-  *decoded = body;
+  // Shrink buf in-place instead of allocating a new body buffer
+  uint8_t *body = safe_realloc(buf, body_size);
+  *decoded = body ? body : buf; // realloc may fail; buf is still valid
   *decoded_len = body_size;
-
-  free(buf);
   return true;
 }

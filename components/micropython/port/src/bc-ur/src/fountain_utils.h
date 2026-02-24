@@ -1,7 +1,11 @@
 #ifndef FOUNTAIN_UTILS_H
 #define FOUNTAIN_UTILS_H
 
-#include "fountain_decoder.h"
+#include "fountain_types.h"
+
+// Enable cross-reduction between mixed parts (slower but may use fewer
+// fragments). Uncomment to enable:
+// #define ENABLE_CROSS_REDUCTION
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -83,6 +87,20 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                       part_indexes_t *result);
 
 /**
+ * Choose fragments with a pre-initialized degree sampler (avoids repeated
+ * sampler allocation)
+ * @param seq_num Sequence number
+ * @param seq_len Total sequence length
+ * @param checksum Message checksum
+ * @param result Output part indexes
+ * @param cached_sampler Pre-initialized sampler (or NULL to create one)
+ * @return true on success
+ */
+bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
+                              uint32_t checksum, part_indexes_t *result,
+                              random_sampler_t *cached_sampler);
+
+/**
  * Check if part_indexes_a is strict subset of part_indexes_b
  * @param a First set
  * @param b Second set
@@ -117,6 +135,7 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b);
  */
 bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
 
+#ifdef ENABLE_CROSS_REDUCTION
 /**
  * Check if two part_indexes have any intersection
  * @param a First set
@@ -136,6 +155,7 @@ bool part_indexes_have_intersection(const part_indexes_t *a,
 bool part_indexes_symmetric_difference(const part_indexes_t *a,
                                        const part_indexes_t *b,
                                        part_indexes_t *result);
+#endif // ENABLE_CROSS_REDUCTION
 
 /**
  * Join fragments into a single message, taking only message_len bytes
