@@ -475,6 +475,7 @@ if(CONFIG_COMPONENT_MICROPYTHON_ENABLE)
         append_srcs_dir(ADD_SRCS "port/src/bc-ur")
         append_srcs_dir(ADD_SRCS "port/src/bc-ur/src")
         append_srcs_dir(ADD_SRCS "port/src/bc-ur/src/types")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUR_USE_K210_SHA256")
     endif()
     #############################################
 
